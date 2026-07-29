@@ -6,14 +6,7 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXBuildFile section */
-		719D9104301650F900A2E4CA /* categories.json in Resources */ = {isa = PBXBuildFile; fileRef = 719D9103301650F900A2E4CA /* categories.json */; };
-		719D91063016510D00A2E4CA /* CategoriesData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719D91053016510D00A2E4CA /* CategoriesData.swift */; };
-/* End PBXBuildFile section */
-
 /* Begin PBXFileReference section */
-		719D9103301650F900A2E4CA /* categories.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = categories.json; sourceTree = "<group>"; };
-		719D91053016510D00A2E4CA /* CategoriesData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoriesData.swift; sourceTree = "<group>"; };
 		71D5874F3014206E0063E703 /* SomethingRandom.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SomethingRandom.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -54,8 +47,6 @@
 			children = (
 				71D587513014206E0063E703 /* SomethingRandom */,
 				71D587503014206E0063E703 /* Products */,
-				719D9103301650F900A2E4CA /* categories.json */,
-				719D91053016510D00A2E4CA /* CategoriesData.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -100,7 +91,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2630;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2660;
 				TargetAttributes = {
 					71D5874E3014206E0063E703 = {
 						CreatedOnToolsVersion = 26.3;
@@ -131,7 +122,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				719D9104301650F900A2E4CA /* categories.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -142,7 +132,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				719D91063016510D00A2E4CA /* CategoriesData.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -208,6 +197,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -265,6 +255,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
