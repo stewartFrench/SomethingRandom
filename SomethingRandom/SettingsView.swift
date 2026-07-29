@@ -71,6 +71,27 @@ struct SettingsView: View
                     } // NavigationLink
                 } // Section
 
+                // Fact Length Section
+
+                Section(header: Text("Fact Length"))
+                {
+                    Stepper(value : $wikipediaManager.maxSentences,
+                            in    : 1...20)
+                    {
+                        Text("Discard fact if greater than \(wikipediaManager.maxSentences) " +
+                             (wikipediaManager.maxSentences == 1 ? "sentence" : "sentences"))
+                    } // Stepper
+                    .onChange(of: wikipediaManager.maxSentences)
+                    {
+                        oldValue, newValue in
+                        wikipediaManager.saveMaxSentences()
+                    } // onChange
+
+                    Text("Retrieved facts longer than this are skipped and another is fetched.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } // Section
+
                 // Info Section
 
                 Section(header: Text("Information"))

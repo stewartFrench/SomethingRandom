@@ -193,6 +193,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - Filter by curated categories (strange, curious, odd)
   - Filter out negative content
   - Check for duplicate facts
+  - Discard facts exceeding the user-set sentence limit
   - Speak fact using configured voice
   - Display fact title during speaking
   - Store facts in history
@@ -571,6 +572,7 @@ SomethingRandom/
 @Published var isEnabled          : Bool
 @Published var frequencyMinutes   : Double
 @Published var isRandomTiming     : Bool
+@Published var maxSentences       : Int
 @Published var availableVoices    : [AVSpeechSynthesisVoice]
 @Published var selectedVoice      : AVSpeechSynthesisVoice?
 @Published var isSpeaking         : Bool
@@ -593,8 +595,9 @@ var usedFactTitlesList            : [UsedFactTitle]
 **Key Methods:**
 
   - `fetchAndSpeakRandomFact()`   - Main fact retrieval and playback
-  - `fetchRandomWikipediaFact()`   - Select category and fetch
-  - `fetchFromCategory(_:negativeKeywords:)`   - Get random from category
+  - `fetchRandomWikipediaFact()`   - Select category and fetch; retries in rounds of 10 and raises the sentence limit if a round fails only due to the sentence filter
+  - `fetchFromCategory(_:negativeKeywords:maxSentences:)`   - Get random from category; returns a `FactFetchResult` (`.found`, `.tooManySentences`, or `.filtered`)
+  - `sentenceCount(in:)`   - Count sentences in text via `.bySentences` enumeration
   - `speakFact(_:)`   - Text-to-speech with intro
   - `startTimer()`   - Begin periodic fact playback
   - `stopTimer()`   - End periodic playback
@@ -613,6 +616,8 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `clearAllUsedFactTitles()`   - Clear all titles and save
   - `reloadCategories()`   - Reload categories from CategoriesData
   - `saveRandomTimingSetting()`   - Save random timing and update next fact time
+  - `loadMaxSentences()`   - Restore max sentence limit from UserDefaults
+  - `saveMaxSentences()`   - Persist max sentence limit to UserDefaults
 
 #### 5.3.6 ContentView (Struct)
 
@@ -653,11 +658,12 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - Navigate to Manage Categories (with count badge)
   - Navigate to Manage Negative Keywords (with count badge)
+  - Fact Length section (stepper to set the max sentence limit, range 1–20)
   - Information section (category/keyword statistics)
   - View Used Fact Titles button (with count badge)
   - Reset to Defaults button
   - Done button in toolbar
-  - Auto-saves all changes via child views
+  - Auto-saves all changes via child views (max sentence limit saved on change)
 
 **State:**
 
@@ -819,6 +825,15 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Logs rejected duplicates for debugging
   - No expiration or limit on stored titles
 
+**Sentence Length Filter:**
+
+  - User-configurable maximum sentence count (`maxSentences`, default 2, range 1–20)
+  - Sentence count measured on the article extract via `.bySentences` enumeration
+  - Facts exceeding the limit are discarded and never spoken or recorded as used
+  - If a full round of 10 attempts fails only because of this filter, the limit is
+    raised by 1 (persisted) and fetching retries; escalation is capped at 20
+  - Rejections for other reasons (keyword, duplicate) do not raise the limit
+
 **Quality Assurance:**
 
   - Multiple retry attempts
@@ -849,6 +864,7 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - `frequencyMinutes`   - Double value for timer interval
   - `isRandomTiming`   - Boolean for random timing mode
+  - `maxSentences`   - Int value for the maximum fact sentence limit
   - `selectedVoiceIdentifier`   - String for voice persistence
   - `usedFactTitlesWithCategories`   - JSON encoded array of UsedFactTitle for duplicate prevention
   - `usedFactTitles`   - Legacy key (migrated to usedFactTitlesWithCategories)
@@ -857,6 +873,7 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - When frequency slider changes
   - When random button toggled
+  - When the sentence limit stepper changes, or when it is auto-raised during fetching
   - When voice selection changes
   - When each fact is spoken (title marked as used)
 
@@ -1196,7 +1213,8 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 **Handled:**
 
   - Network failures (error message spoken)
-  - All categories exhausted (tries 10 times)
+  - All categories exhausted (tries 10 times per round)
+  - Sentence limit too low to find a fact (limit auto-raised by 1 per failed round, capped at 20)
   - No voices available (fallback)
   - Empty fact history (placeholder text)
   - UserDefaults corruption (defaults used)

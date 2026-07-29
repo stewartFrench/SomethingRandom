@@ -21,6 +21,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var isEnabled          : Bool                       = false
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
+    @Published var maxSentences       : Int                        = 2
     @Published var availableVoices    : [AVSpeechSynthesisVoice]   = []
     @Published var selectedVoice      : AVSpeechSynthesisVoice?
     @Published var isSpeaking         : Bool                       = false
@@ -66,6 +67,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         loadAvailableVoices()
         loadVoiceSelection()
         loadFrequency()
+        loadMaxSentences()
         loadRandomTimingSetting()
         loadUsedFactTitles()
         configureAudioSession()
@@ -384,6 +386,61 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let defaults = UserDefaults.standard
         defaults.set(frequencyMinutes, forKey: "frequencyMinutes")
     } // saveFrequency
+
+
+
+    // -----------------------------------------
+
+    private func loadMaxSentences()
+    {
+        let defaults = UserDefaults.standard
+
+        if defaults.object(forKey: "maxSentences") != nil
+        {
+            maxSentences = defaults.integer(forKey: "maxSentences")
+            // print("Restored max sentences: \(maxSentences)")
+        } // if
+        else
+        {
+            // print("Using default max sentences: \(maxSentences)")
+        } // else
+    } // loadMaxSentences
+
+
+
+    // -----------------------------------------
+
+    func saveMaxSentences()
+    {
+        let defaults = UserDefaults.standard
+        defaults.set(maxSentences, forKey: "maxSentences")
+    } // saveMaxSentences
+
+
+
+    // -----------------------------------------
+
+    nonisolated private func sentenceCount(in text: String) -> Int
+    {
+        // Count sentences using the system's natural-language segmentation,
+        // which handles abbreviations better than naive punctuation splitting.
+
+        var count = 0
+
+        text.enumerateSubstrings(in       : text.startIndex..<text.endIndex,
+                                  options : .bySentences)
+        {
+            substring, _, _, _ in
+
+            if let substring = substring,
+               !substring.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                count += 1
+            } // if
+        } // enumerateSubstrings
+
+        return count
+    } // sentenceCount
     
     
     
@@ -568,31 +625,84 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         // Load categories and keywords from configuration
         let categories = await MainActor.run { self.categoriesData.categories }
         let negativeKeywords = await MainActor.run { self.categoriesData.negativeKeywords }
-        
-        // Try up to 10 times to get a positive article
-        for _ in 0..<10
-        {
-            // Pick a random category
-            let category = categories.randomElement() ?? "Science"
+        var maxSentences = await MainActor.run { self.maxSentences }
 
-            // Fetch random page from category
-            if let fact = try await fetchFromCategory(category,
-                                                       negativeKeywords: negativeKeywords)
+        // Upper bound for automatically raising the sentence limit. Matches the
+        // range of the Settings stepper so the persisted value stays in range.
+        let sentenceLimitCeiling = 20
+
+        // Keep trying, raising the sentence limit if a full round of attempts
+        // fails only because facts kept exceeding the current limit.
+        while true
+        {
+            var sawTooManySentences = false
+
+            // Try up to 10 times to get a usable article
+            for _ in 0..<10
             {
-                return fact
-            } // if
-        } // for
-        
-        // Fallback if all attempts fail
-        throw URLError(.cannotFindHost)
+                // Pick a random category
+                let category = categories.randomElement() ?? "Science"
+
+                // Fetch random page from category
+                let result = try await fetchFromCategory(category,
+                                                          negativeKeywords: negativeKeywords,
+                                                          maxSentences: maxSentences)
+
+                switch result
+                {
+                    case .found(let fact):
+                        return fact
+
+                    case .tooManySentences:
+                        sawTooManySentences = true
+
+                    case .filtered:
+                        break
+                } // switch
+            } // for
+
+            // If the round failed and at least one candidate was rejected purely
+            // for exceeding the sentence limit, raise the limit by 1, persist it,
+            // and try again. Otherwise give up.
+
+            guard sawTooManySentences, maxSentences < sentenceLimitCeiling else
+            {
+                throw URLError(.cannotFindHost)
+            } // guard
+
+            maxSentences += 1
+            let newLimit = maxSentences
+
+            await MainActor.run
+            {
+                self.maxSentences = newLimit
+                self.saveMaxSentences()
+            } // MainActor
+        } // while
     } // fetchRandomWikipediaFact
     
     
     
     // -----------------------------------------
 
-    nonisolated private func fetchFromCategory(_ category: String, 
-                                                negativeKeywords: [String]) async throws -> WikipediaFact?
+    // Outcome of a single fetch attempt. Distinguishes a rejection due to the
+    // sentence limit from other rejections so the caller can decide whether to
+    // raise the limit and retry.
+
+    private enum FactFetchResult
+    {
+        case found(WikipediaFact)
+        case tooManySentences
+        case filtered
+    } // FactFetchResult
+
+
+
+    // -----------------------------------------
+
+    nonisolated private func fetchFromCategory(_ category: String,
+                                                negativeKeywords: [String],
+                                                maxSentences: Int) async throws -> FactFetchResult
     {
         // Wikipedia API endpoint to get random pages from a category
         let urlString = "https://en.wikipedia.org/w/api.php?action=query&format=json&list=categorymembers&cmtitle=Category:\(category)&cmlimit=50&cmnamespace=0"
@@ -601,7 +711,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: encodedURL) else
         {
-            return nil
+            return .filtered
         } // guard
         
         var request = URLRequest(url: url)
@@ -615,13 +725,13 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard !categoryResponse.query.categorymembers.isEmpty else
         {
-            return nil
+            return .filtered
         } // guard
 
         // Pick a random page from the category
         guard let randomMember = categoryResponse.query.categorymembers.randomElement() else
         {
-            return nil
+            return .filtered
         } // guard
         
         // Fetch the page summary
@@ -631,7 +741,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard let summaryURL = URL(string: summaryURLString) else
         {
-            return nil
+            return .filtered
         } // guard
         
         var summaryRequest = URLRequest(url: summaryURL)
@@ -650,17 +760,25 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             if combinedText.contains(keyword.lowercased())
             {
                 // print("Filtered out article containing '\(keyword)': \(summaryResponse.title)")
-                return nil
+                return .filtered
             } // if
         } // for
-        
+
+        // Discard facts whose body exceeds the maximum sentence count
+
+        if sentenceCount(in: summaryResponse.extract) > maxSentences
+        {
+            // print("Filtered out article with too many sentences: \(summaryResponse.title)")
+            return .tooManySentences
+        } // if
+
         // Check if we've already used this fact title
         let factTitle = summaryResponse.title
         
         if await MainActor.run(body: { self.isFactTitleUsed(factTitle) })
         {
             // print("Filtered out duplicate fact: '\(factTitle)'")
-            return nil
+            return .filtered
         } // if
         
         // Create a fact from the title and extract
@@ -672,7 +790,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard let url = URL(string: wikiUrlString) else
         {
-            return nil
+            return .filtered
         } // guard
         
         // Format category name for display (remove underscores)
@@ -680,8 +798,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let displayCategory = category.replacingOccurrences(of: "_", with: " ")
         
         let fact = WikipediaFact(text: factText, url: url, category: displayCategory)
-        
-        return fact
+
+        return .found(fact)
     } // fetchFromCategory
     
     
