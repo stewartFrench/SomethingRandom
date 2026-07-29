@@ -827,11 +827,13 @@ var usedFactTitlesList            : [UsedFactTitle]
 
 **Sentence Length Filter:**
 
-  - User-configurable maximum sentence count (`maxSentences`, default 2, range 1–20)
+  - User-configurable maximum sentence count (`maxSentences`, default 5, range 1–20)
   - Sentence count measured on the article extract via `.bySentences` enumeration
   - Facts exceeding the limit are discarded and never spoken or recorded as used
   - If a full round of 10 attempts fails only because of this filter, the limit is
     raised by 1 (persisted) and fetching retries; escalation is capped at 20
+  - A hard cap of 30 total fetch attempts bounds how long a single fetch can run,
+    so it completes within the OS background execution window even at a strict limit
   - Rejections for other reasons (keyword, duplicate) do not raise the limit
 
 **Quality Assurance:**
@@ -1215,6 +1217,7 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
   - Network failures (error message spoken)
   - All categories exhausted (tries 10 times per round)
   - Sentence limit too low to find a fact (limit auto-raised by 1 per failed round, capped at 20)
+  - Runaway fetching (hard cap of 30 total attempts keeps a fetch within the background window)
   - No voices available (fallback)
   - Empty fact history (placeholder text)
   - UserDefaults corruption (defaults used)

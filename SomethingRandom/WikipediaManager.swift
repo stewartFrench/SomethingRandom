@@ -21,7 +21,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var isEnabled          : Bool                       = false
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
-    @Published var maxSentences       : Int                        = 2
+    @Published var maxSentences       : Int                        = 5
     @Published var availableVoices    : [AVSpeechSynthesisVoice]   = []
     @Published var selectedVoice      : AVSpeechSynthesisVoice?
     @Published var isSpeaking         : Bool                       = false
@@ -632,6 +632,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         // range of the Settings stepper so the persisted value stays in range.
         let sentenceLimitCeiling = 20
 
+        // Hard cap on total fetch attempts across all rounds. Keeps a single
+        // fetch short enough to complete within the OS background execution
+        // window, even if the user sets a very strict sentence limit.
+        let maxTotalAttempts = 30
+        var totalAttempts = 0
+
         // Keep trying, raising the sentence limit if a full round of attempts
         // fails only because facts kept exceeding the current limit.
         while true
@@ -641,6 +647,14 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             // Try up to 10 times to get a usable article
             for _ in 0..<10
             {
+                // Stop if we have exhausted the overall attempt budget
+                guard totalAttempts < maxTotalAttempts else
+                {
+                    throw URLError(.cannotFindHost)
+                } // guard
+
+                totalAttempts += 1
+
                 // Pick a random category
                 let category = categories.randomElement() ?? "Science"
 
@@ -716,7 +730,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         } // guard
         
         var request = URLRequest(url: url)
-        request.setValue("SLFRandom/1.0 (iOS app; contact: stewart.french@gmail.com)", 
+        request.setValue("WikiCurios/1.0 (iOS app; contact: stewart.french@gmail.com)", 
                          forHTTPHeaderField: "User-Agent")
         
         let (data, _) = try await URLSession.shared.data(for: request)
@@ -746,7 +760,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         } // guard
         
         var summaryRequest = URLRequest(url: summaryURL)
-        summaryRequest.setValue("SLFRandom/1.0 (iOS app; contact: stewart.french@gmail.com)", 
+        summaryRequest.setValue("WikiCurios/1.0 (iOS app; contact: stewart.french@gmail.com)", 
                                  forHTTPHeaderField: "User-Agent")
         
         let (summaryData, _) = try await URLSession.shared.data(for: summaryRequest)
