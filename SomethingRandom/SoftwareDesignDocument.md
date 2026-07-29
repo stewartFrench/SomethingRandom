@@ -390,7 +390,9 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 **Technical Details:**
 
   - usedFactTitles Set<UsedFactTitle> property
-  - UsedFactTitle struct stores title, category, and UUID
+  - UsedFactTitle struct stores title, category, and UUID (for Identifiable)
+  - Custom Hashable implementation using only title + category (not UUID)
+  - This prevents duplicate entries when speech retries call markFactTitleAsUsed() multiple times
   - loadUsedFactTitles() loads from UserDefaults on init
   - saveUsedFactTitles() persists array to UserDefaults
   - isFactTitleUsed() checks if title already spoken
@@ -829,7 +831,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Logs rejected duplicates for debugging
   - No expiration or limit on stored titles
 
-**Sentence Length Filter:**
+**Sentence Length Filter (Retrieval):**
 
   - User-configurable maximum sentence count (`maxSentences`, default 5, range 1–20)
   - Sentence count measured on the article extract via `.bySentences` enumeration
@@ -839,6 +841,15 @@ var usedFactTitlesList            : [UsedFactTitle]
   - A hard cap of 30 total fetch attempts bounds how long a single fetch can run,
     so it completes within the OS background execution window even at a strict limit
   - Rejections for other reasons (keyword, duplicate) do not raise the limit
+
+**Spoken Length Truncation:**
+
+  - User-configurable maximum spoken sentences (`maxSpokenSentences`, default 5, range 1–20)
+  - Applied after fact is retrieved and before speech synthesis
+  - Truncates fact text to first N sentences using `.bySentences` enumeration
+  - Full fact text stored in history, but only truncated portion is spoken
+  - Independent from retrieval filter - allows retrieving longer facts but speaking less
+  - More efficient than discard approach - uses first acceptable fact without retries
 
 **Quality Assurance:**
 
@@ -922,15 +933,15 @@ an app is backgrounded or the device is in standby mode.
 ### 7.3 Audio Session Configuration
 
 **Category:** `.playback`
-**Mode:** `.spokenAudio`
-**Options:** None (no `.mixWithOthers`)
+**Mode:** `.voicePrompt`
+**Options:** `[.mixWithOthers]`
 
 **Reasoning:**
 
   - `.playback` enables background audio and works in silent mode
-  - `.spokenAudio` optimized for longer-form speech content (better than `.voicePrompt`)
-  - No `.mixWithOthers` prevents other apps from stopping our background audio
-  - More reliable background execution without mixing
+  - `.voicePrompt` required for CarPlay compatibility
+  - `.mixWithOthers` allows music and other audio to continue playing during speech
+  - Facts speak on top of existing audio without interrupting it
 
 **Critical: Audio Session Persistence:**
 

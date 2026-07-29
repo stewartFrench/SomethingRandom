@@ -22,6 +22,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
     @Published var maxSentences       : Int                        = 5
+    @Published var maxSpokenSentences : Int                        = 5
     @Published var availableVoices    : [AVSpeechSynthesisVoice]   = []
     @Published var selectedVoice      : AVSpeechSynthesisVoice?
     @Published var isSpeaking         : Bool                       = false
@@ -68,6 +69,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         loadVoiceSelection()
         loadFrequency()
         loadMaxSentences()
+        loadMaxSpokenSentences()
         loadRandomTimingSetting()
         loadUsedFactTitles()
         configureAudioSession()
@@ -306,10 +308,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         {
             let audioSession = AVAudioSession.sharedInstance()
 
-            // Use .playback with .spokenAudio for reliable background audio
-            // Not using .mixWithOthers to prevent other apps from stopping our audio
+            // Use .playback with .voicePrompt for reliable background audio and CarPlay compatibility
+            // .mixWithOthers allows music to continue playing during speech
 
-            try audioSession.setCategory(.playback, mode: .spokenAudio)
+            try audioSession.setCategory(.playback, 
+                                          mode: .voicePrompt, 
+                                          options: [.mixWithOthers])
             try audioSession.setActive(true)
         } // do
         catch
@@ -559,6 +563,35 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     // -----------------------------------------
 
+    private func loadMaxSpokenSentences()
+    {
+        let defaults = UserDefaults.standard
+
+        if defaults.object(forKey: "maxSpokenSentences") != nil
+        {
+            maxSpokenSentences = defaults.integer(forKey: "maxSpokenSentences")
+            // print("Restored max spoken sentences: \(maxSpokenSentences)")
+        } // if
+        else
+        {
+            // print("Using default max spoken sentences: \(maxSpokenSentences)")
+        } // else
+    } // loadMaxSpokenSentences
+
+
+
+    // -----------------------------------------
+
+    func saveMaxSpokenSentences()
+    {
+        let defaults = UserDefaults.standard
+        defaults.set(maxSpokenSentences, forKey: "maxSpokenSentences")
+    } // saveMaxSpokenSentences
+
+
+
+    // -----------------------------------------
+
     nonisolated private func sentenceCount(in text: String) -> Int
     {
         // Count sentences using the system's natural-language segmentation,
@@ -580,6 +613,38 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
         return count
     } // sentenceCount
+    
+    
+    
+    // -----------------------------------------
+
+    nonisolated private func truncateToSentences(_ text: String, maxSentences: Int) -> String
+    {
+        // Truncate text to first N sentences using natural-language segmentation
+        
+        var sentences: [String] = []
+        var sentenceCount = 0
+        
+        text.enumerateSubstrings(in       : text.startIndex..<text.endIndex,
+                                  options : .bySentences)
+        {
+            substring, _, _, stop in
+            
+            if let substring = substring,
+               !substring.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                sentences.append(substring)
+                sentenceCount += 1
+                
+                if sentenceCount >= maxSentences
+                {
+                    stop = true
+                } // if
+            } // if
+        } // enumerateSubstrings
+        
+        return sentences.joined()
+    } // truncateToSentences
     
     
     
@@ -1041,8 +1106,11 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         // Set the title immediately when we start speaking
         currentSpeakingTitle = fact.title
         
-        // Store the fact text to be spoken after intro
-        pendingFactText = fact.text
+        // Truncate the fact text to maxSpokenSentences before speaking
+        let truncatedText = truncateToSentences(fact.text, maxSentences: maxSpokenSentences)
+        
+        // Store the truncated fact text to be spoken after intro
+        pendingFactText = truncatedText
 
         // print("DEBUG: About to speak intro utterance")
 
@@ -1546,7 +1614,7 @@ struct WikipediaFact: Identifiable
 // ------------
 // Model to store a used fact title with its category
 
-@preconcurrency struct UsedFactTitle: Codable, Hashable, Identifiable, Sendable
+@preconcurrency struct UsedFactTitle: Codable, Identifiable, Sendable
 {
     let id: UUID
     let title: String
@@ -1558,4 +1626,20 @@ struct WikipediaFact: Identifiable
         self.title = title
         self.category = category
     } // init
+    
+    // Custom Hashable implementation - only hash title and category, not UUID
+    // This prevents duplicates when the same fact is added multiple times
+    
+    static func == (lhs: UsedFactTitle, rhs: UsedFactTitle) -> Bool
+    {
+        return lhs.title == rhs.title && lhs.category == rhs.category
+    } // ==
+    
+    func hash(into hasher: inout Hasher)
+    {
+        hasher.combine(title)
+        hasher.combine(category)
+    } // hash
 } // struct UsedFactTitle
+
+extension UsedFactTitle: Hashable { }

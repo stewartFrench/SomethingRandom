@@ -92,6 +92,29 @@ struct SettingsView: View
                         .foregroundColor(.secondary)
                 } // Section
 
+                // Spoken Length Section
+
+                Section(header: Text("Spoken Length"))
+                {
+                    Stepper(value : $wikipediaManager.maxSpokenSentences,
+                            in    : 1...20)
+                    {
+                        Text("Limit speaking to \(wikipediaManager.maxSpokenSentences) " +
+                             (wikipediaManager.maxSpokenSentences == 1 ? "sentence" : "sentences"))
+                    } // Stepper
+                    .onChange(of: wikipediaManager.maxSpokenSentences)
+                    {
+                        oldValue, newValue in
+                        wikipediaManager.saveMaxSpokenSentences()
+                    } // onChange
+
+                    Text("Only the first \(wikipediaManager.maxSpokenSentences) " +
+                         (wikipediaManager.maxSpokenSentences == 1 ? "sentence" : "sentences") +
+                         " of each fact will be spoken, even if the full fact is longer.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } // Section
+
                 // Info Section
 
                 Section(header: Text("Information"))
