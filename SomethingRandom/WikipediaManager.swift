@@ -607,6 +607,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
                 // Speak an error message
                 let errorFact = WikipediaFact(
+                    title: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     text: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     url: URL(string: "https://en.wikipedia.org")!,
                     category: "Error"
@@ -797,7 +798,10 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         let displayCategory = category.replacingOccurrences(of: "_", with: " ")
         
-        let fact = WikipediaFact(text: factText, url: url, category: displayCategory)
+        let fact = WikipediaFact(title: summaryResponse.title,
+                                 text: factText,
+                                 url: url,
+                                 category: displayCategory)
 
         return .found(fact)
     } // fetchFromCategory
@@ -877,12 +881,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             return
         } // if
         
-        // Extract and mark the title as used
-        let title = fact.text.components(separatedBy: ". ").first ?? fact.text
-        markFactTitleAsUsed(title, category: fact.category)
+        // Mark the title as used (use the stored title so the value recorded
+        // exactly matches the one checked in fetchFromCategory)
+        markFactTitleAsUsed(fact.title, category: fact.category)
         
         // Set the title immediately when we start speaking
-        currentSpeakingTitle = fact.text
+        currentSpeakingTitle = fact.title
         
         // Store the fact text to be spoken after intro
         pendingFactText = fact.text
@@ -1412,6 +1416,7 @@ struct WikipediaCategoryMember: Codable, Sendable
 struct WikipediaFact: Identifiable
 {
     let id = UUID()
+    let title: String
     let text: String
     let url: URL
     let category: String

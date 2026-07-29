@@ -78,12 +78,9 @@ struct ContentView: View
                     
                     if !wikipediaManager.currentSpeakingTitle.isEmpty
                     {
-                        // Extract just the title (first sentence before the first period)
+                        // currentSpeakingTitle now holds the article title directly
 
-                        let title = wikipediaManager.currentSpeakingTitle.components(separatedBy: ". ").first ??
-                                    wikipediaManager.currentSpeakingTitle
-
-                        Text(title)
+                        Text(wikipediaManager.currentSpeakingTitle)
                             .font(.title3)
                             .fontWeight(.bold)
                             .multilineTextAlignment(.center)

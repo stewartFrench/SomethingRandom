@@ -393,7 +393,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - markFactTitleAsUsed() adds UsedFactTitle to set and saves
   - fetchFromCategory() checks for duplicates before returning fact
   - speakFact() marks title as used when speaking begins
-  - Duplicate check uses fact title only (before first period)
+  - Both the duplicate check and the "mark as used" step use the exact Wikipedia article title, stored on WikipediaFact.title, so the compared and recorded strings always match
   - UserDefaults key: "usedFactTitlesWithCategories"
   - Backward compatible with old "usedFactTitles" key (migrates automatically)
 
@@ -847,7 +847,7 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - In-memory array of WikipediaFact objects
   - Not persisted across launches (by design)
-  - Each fact includes text and URL
+  - Each fact includes title, text, URL, and category
 
 **Display:**
 
