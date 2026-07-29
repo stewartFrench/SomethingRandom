@@ -10,7 +10,7 @@ Some of these are so fun and interesting you will just have to share them with y
 -----------------------------------------------
 ## Documentation
 
-See [SoftwareDesignDocument.md](WikiCurios/SoftwareDesignDocument.md) for detailed technical documentation including:
+See [SoftwareDesignDocument.md](SomethingRandom/SoftwareDesignDocument.md) for detailed technical documentation including:
 
 - Architecture overview
 - Component breakdown
