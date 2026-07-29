@@ -54,6 +54,7 @@ struct ContentView: View
                 VStack(spacing: 8)
                 {
                     // App icon - using a bundled image
+
                     if let icons = Bundle.main.object(forInfoDictionaryKey: "CFBundleIcons") as? [String: Any],
                        let primaryIcon = icons["CFBundlePrimaryIcon"] as? [String: Any],
                        let iconFiles = primaryIcon["CFBundleIconFiles"] as? [String],
@@ -69,6 +70,7 @@ struct ContentView: View
                     else
                     {
                         // Fallback to custom icon or SF Symbol
+
                         Image(systemName: "book.circle.fill")
                             .font(.system(size: 70))
                             .foregroundStyle(.blue)
@@ -77,6 +79,7 @@ struct ContentView: View
                     if !wikipediaManager.currentSpeakingTitle.isEmpty
                     {
                         // Extract just the title (first sentence before the first period)
+
                         let title = wikipediaManager.currentSpeakingTitle.components(separatedBy: ". ").first ??
                                     wikipediaManager.currentSpeakingTitle
 

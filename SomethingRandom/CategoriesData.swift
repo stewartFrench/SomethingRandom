@@ -12,15 +12,18 @@ import Foundation
 // Model for loading categories and negative keywords from JSON
 struct CategoriesData: Codable, Sendable
 {
-    var categories       : [String]
-    var negativeKeywords : [String]
+    var categories          : [String]
+    var negativeKeywords    : [String]
     var userAddedCategories : [String]
     var userAddedKeywords   : [String]
     
     
-    
     // -----------------------------------------
-    init(categories: [String], negativeKeywords: [String], userAddedCategories: [String] = [], userAddedKeywords: [String] = [])
+    init(
+                categories: [String], 
+          negativeKeywords: [String], 
+       userAddedCategories: [String] = [], 
+         userAddedKeywords: [String] = [])
     {
         self.categories = categories
         self.negativeKeywords = negativeKeywords
@@ -90,6 +93,7 @@ struct CategoriesData: Codable, Sendable
         catch
         {
             // print("Failed to load categories from documents: \(error)")
+
             return nil
         } // catch
     } // loadFromDocumentsDirectory
