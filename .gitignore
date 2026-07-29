@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Xcode - build output
+build/
+DerivedData/
+*.xcarchive
+
+# Xcode - per-user state (breakpoints, window layout, etc.)
+xcuserdata/
+*.xcuserstate
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Editor / tooling backups
+*~
+*.backup
+*.orig
