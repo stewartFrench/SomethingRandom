@@ -73,6 +73,36 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         configureAudioSession()
         setupSilentAudioPlayer()
         
+        // Observe audio session interruptions to restart silent audio
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil
+        )
+        
+        // Monitor app lifecycle to maintain background audio
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+        
         // Speak one fact on launch after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0)
         {
@@ -82,6 +112,15 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             } // Task
         } // DispatchQueue.main.asyncAfter
     } // init
+    
+    
+    
+    // -----------------------------------------
+
+    deinit
+    {
+        NotificationCenter.default.removeObserver(self)
+    } // deinit
     
     
     
@@ -267,11 +306,10 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         {
             let audioSession = AVAudioSession.sharedInstance()
 
-            // Use .playback category to ensure audio plays even in silent mode
+            // Use .playback with .spokenAudio for reliable background audio
+            // Not using .mixWithOthers to prevent other apps from stopping our audio
 
-            try audioSession.setCategory(.playback,
-                                          mode    : .voicePrompt,
-                                          options : [.mixWithOthers])
+            try audioSession.setCategory(.playback, mode: .spokenAudio)
             try audioSession.setActive(true)
         } // do
         catch
@@ -346,7 +384,24 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     private func startSilentAudio()
     {
-        audioPlayer?.play()
+        guard let player = audioPlayer else { return }
+        
+        if !player.isPlaying
+        {
+            player.play()
+            
+            // Verify playback started after a brief delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5)
+            {
+                [weak self] in
+                if self?.audioPlayer?.isPlaying == false
+                {
+                    // Retry if failed - reconfigure audio session and try again
+                    self?.configureAudioSession()
+                    self?.audioPlayer?.play()
+                } // if
+            } // asyncAfter
+        } // if
     } // startSilentAudio
     
     
@@ -357,6 +412,90 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     {
         audioPlayer?.stop()
     } // stopSilentAudio
+    
+    
+    
+    // -----------------------------------------
+    // MARK: - Notification Handlers
+    
+    
+    
+    // -----------------------------------------
+    
+    @objc private func handleAudioSessionInterruption(notification: Notification)
+    {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else
+        {
+            return
+        } // guard
+        
+        if type == .ended
+        {
+            // Interruption ended - restart silent audio if timer is running
+            if isEnabled
+            {
+                do
+                {
+                    try AVAudioSession.sharedInstance().setActive(true)
+                    startSilentAudio()
+                } // do
+                catch
+                {
+                    // print("Failed to reactivate audio session after interruption: \(error)")
+                } // catch
+            } // if
+        } // if
+    } // handleAudioSessionInterruption
+    
+    
+    
+    // -----------------------------------------
+    
+    @objc private func handleAudioSessionRouteChange(notification: Notification)
+    {
+        // Restart silent audio if it stopped
+        if isEnabled && audioPlayer?.isPlaying == false
+        {
+            startSilentAudio()
+        } // if
+    } // handleAudioSessionRouteChange
+    
+    
+    
+    // -----------------------------------------
+    
+    @objc private func appDidEnterBackground()
+    {
+        // Ensure silent audio is playing when entering background
+        if isEnabled
+        {
+            startSilentAudio()
+        } // if
+    } // appDidEnterBackground
+    
+    
+    
+    // -----------------------------------------
+    
+    @objc private func appWillEnterForeground()
+    {
+        // Verify everything is still running when returning to foreground
+        if isEnabled
+        {
+            if audioPlayer?.isPlaying == false
+            {
+                startSilentAudio()
+            } // if
+            
+            // Verify timer is still valid
+            if timer == nil || timer!.isValid == false
+            {
+                rescheduleNextFact()
+            } // if
+        } // if
+    } // appWillEnterForeground
     
     
     
@@ -1244,51 +1383,17 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         factUtterance = nil
         pendingFactText = nil
         
-        // Reset audio session to ensure clean state
+        // DO NOT deactivate audio session - keep it active for background audio
+        // Deactivating the session causes iOS to suspend the app in background
         
-        do
+        // Clear stopping flag after a brief delay
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)
         {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
-            
-            // Small delay before reactivating
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1)
-            {
-                [weak self] in
-                
-                do
-                {
-                    try AVAudioSession.sharedInstance().setActive(true)
-                    // print("DEBUG: Audio session reactivated")
-                } // do
-                catch
-                {
-                    // print("DEBUG: Failed to reactivate audio session: \(error)")
-                } // catch
-                
-                // Clear stopping flag after audio session is reset
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)
-                {
-                    self?.isStopping = false
-                    // print("DEBUG: Stopping flag cleared")
-                } // asyncAfter
-            } // asyncAfter
-        } // do
-        catch
-        {
-            // print("DEBUG: Failed to deactivate audio session: \(error)")
-
-            // Still clear stopping flag
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5)
-            {
-                [weak self] in
-                self?.isStopping = false
-                // print("DEBUG: Stopping flag cleared (after error)")
-            } // asyncAfter
-        } // catch
+            [weak self] in
+            self?.isStopping = false
+            // print("DEBUG: Stopping flag cleared")
+        } // asyncAfter
 
         // print("DEBUG: stopSpeaking() completed")
     } // stopSpeaking

@@ -295,8 +295,12 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
   - Silent audio looping technique
   - Background audio mode enabled
-  - AVAudioSession configured for playback
+  - AVAudioSession configured for playback with .spokenAudio mode
   - Timer added to RunLoop with .common mode
+  - Audio session never deactivated while timer is running
+  - Interruption handling to resume silent audio after phone calls, etc.
+  - App lifecycle monitoring to restart audio when returning from background
+  - Silent audio verification with automatic retry on failure
 
 ### 4.7 Fact History Display
 
@@ -918,23 +922,50 @@ an app is backgrounded or the device is in standby mode.
 ### 7.3 Audio Session Configuration
 
 **Category:** `.playback`
-**Mode:** `.voicePrompt`
-**Options:** `[.mixWithOthers]`
+**Mode:** `.spokenAudio`
+**Options:** None (no `.mixWithOthers`)
 
 **Reasoning:**
 
-  - `.playback` enables background audio
-  - `.voicePrompt` optimized for speech
-  - `.mixWithOthers` allows other apps' audio simultaneously
-  - Works even in silent mode
+  - `.playback` enables background audio and works in silent mode
+  - `.spokenAudio` optimized for longer-form speech content (better than `.voicePrompt`)
+  - No `.mixWithOthers` prevents other apps from stopping our background audio
+  - More reliable background execution without mixing
 
-**Note on Audio Ducking:**
+**Critical: Audio Session Persistence:**
 
-  - Attempted `.duckOthers` option
-  - Caused issues with music playback
-  - Reverted to `.mixWithOthers` for better compatibility
+  - Audio session NEVER deactivated while timer is running
+  - Previous implementation deactivated session on "Stop Speaking" causing app suspension
+  - Session remains active from timer start until timer stop
+  - Ensures continuous background operation
 
-### 7.4 Background Modes
+### 7.4 Reliability Improvements
+
+**Interruption Handling:**
+
+  - Observes `AVAudioSession.interruptionNotification`
+  - Automatically resumes silent audio after phone calls, Siri, etc.
+  - Reactivates audio session when interruptions end
+
+**App Lifecycle Monitoring:**
+
+  - Observes `UIApplication.didEnterBackgroundNotification`
+  - Observes `UIApplication.willEnterForegroundNotification`
+  - Restarts silent audio when entering background
+  - Verifies and restarts silent audio and timer when returning to foreground
+
+**Silent Audio Verification:**
+
+  - Checks if playback actually started after calling `play()`
+  - Automatically retries with audio session reconfiguration if playback fails
+  - Prevents silent failures in background
+
+**Audio Route Changes:**
+
+  - Observes `AVAudioSession.routeChangeNotification`
+  - Restarts silent audio if it stops due to headphone disconnect, etc.
+
+### 7.5 Background Modes
 
 **Configuration:** Added via project settings
 
