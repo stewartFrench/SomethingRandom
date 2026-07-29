@@ -2,7 +2,7 @@
 
 I noticed that when the World Cup was going on here in Dallas the online and TV news stories were all upbeat, fun, and heart warming.  Now with it over the stories are back to crime, war, politics, death.  It's all bad news.  If you want Good News then this is the app for you.
 
-When you run WikiCurios on your iPhone it will read you a random, curious and interesting Wikipedia entry.  It can run in background and standby at custom intervals or at random.  So, if you set it for every hour (say) then on-the-hour you will hear a curious and interesting wikipedia factoid.  WikiCurios will also present you the text of the factoid with a links so you can explore it further on Wikipedia or share it with your friends.
+When you run WikiCurios on your iPhone it will read you a random, curious and interesting Wikipedia entry.  It can run in background and standby at custom intervals or at random.  So, if you set it for every hour (say) then on-the-hour you will hear a curious and interesting wikipedia factoid.  WikiCurios will also present you the text of the factoid with a link so you can explore it further on Wikipedia.
 
 Some of these are so fun and interesting you will just have to share them with your family and friends!  They will really love you for this.
 
