@@ -324,10 +324,20 @@ struct ContentView: View
                                         .font(.body)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     
-                                    Text("Category: \(fact.category)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.top, 4)
+                                    HStack(spacing: 4)
+                                    {
+                                        Text("Category: \(fact.category)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        
+                                        if let count = wikipediaManager.categoryArticleCounts[fact.category.replacingOccurrences(of: " ", with: "_")]
+                                        {
+                                            Text("(\(count) articles)")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.top, 4)
 
                                     // Wikipedia link button
                                     Link(destination: fact.url)
@@ -354,6 +364,13 @@ struct ContentView: View
                                     Divider()
                                 } // if
                             } // ForEach
+                            
+                            // Add bottom padding to prevent Stop Speaking button from covering content
+                            if wikipediaManager.isSpeaking
+                            {
+                                Color.clear
+                                    .frame(height: 80)
+                            } // if
                         } // else
                     } // VStack
                     .onChange(of: wikipediaManager.factHistory.count)

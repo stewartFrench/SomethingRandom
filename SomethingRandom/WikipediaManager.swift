@@ -21,8 +21,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var isEnabled          : Bool                       = false
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
-    @Published var maxSentences       : Int                        = 5
-    @Published var maxSpokenSentences : Int                        = 5
+    @Published var maxSpokenSentences : Int                        = 3
+    @Published var isHumorMode        : Bool                       = false
     @Published var availableVoices    : [AVSpeechSynthesisVoice]   = []
     @Published var selectedVoice      : AVSpeechSynthesisVoice?
     @Published var isSpeaking         : Bool                       = false
@@ -44,15 +44,47 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     } // usedFactTitlesList
     
     private var synthesizer = AVSpeechSynthesizer()
-    private var timer       : Timer?
-    private var audioPlayer : AVAudioPlayer?
-    private var factUtterance : AVSpeechUtterance?
-    private var pendingFactText : String?
-    private var isStopping : Bool = false
+    private var timer            : Timer?
+    private var audioPlayer      : AVAudioPlayer?
+    private var factUtterance    : AVSpeechUtterance?
+    private var pendingFactText  : String?
+    private var isStopping       : Bool = false
     private var speechStartTimer : Timer?
     private var recoveryAttempts : Int = 0
-    @Published private var usedFactTitles : Set<UsedFactTitle> = []
-    private var categoriesData : CategoriesData
+    @Published private var usedFactTitles 
+                                 : Set<UsedFactTitle> = []
+    private var categoriesData   : CategoriesData
+    @Published var categoryArticleCounts: [String: Int] = [:]
+    private var categoryCountsTimestamp: Date?
+    
+    // Humorous categories for Humor Mode filtering
+    private let humorousCategories: Set<String> = [
+        "Absurdist_fiction",
+        "Catchphrases",
+        "Competitive_eating",
+        "Conspiracy_theories",
+        "Exploding_animals",
+        "Food_and_drink_curiosities",
+        "Hoaxes",
+        "Individual_animals",
+        "Internet_memes",
+        "Ironic_and_humorous_awards",
+        "Jokes",
+        "Mockumentaries",
+        "Mondegreens",
+        "Novelty_items",
+        "Parody_films",
+        "Pranks",
+        "Puns",
+        "Running_gags",
+        "Satire",
+        "Scandals",
+        "Stand-up_comedy",
+        "Tall_tales",
+        "Unusual_achievements",
+        "Unusual_competitions",
+        "Unusual_foods"
+    ]
     
     
     
@@ -68,10 +100,11 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         loadAvailableVoices()
         loadVoiceSelection()
         loadFrequency()
-        loadMaxSentences()
         loadMaxSpokenSentences()
         loadRandomTimingSetting()
+        loadHumorMode()
         loadUsedFactTitles()
+        loadCategoryArticleCounts()
         configureAudioSession()
         setupSilentAudioPlayer()
         
@@ -444,6 +477,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                 {
                     try AVAudioSession.sharedInstance().setActive(true)
                     startSilentAudio()
+                    
+                    // Verify timer is still valid after interruption
+                    if timer == nil || timer!.isValid == false
+                    {
+                        rescheduleNextFact()
+                    } // if
                 } // do
                 catch
                 {
@@ -476,6 +515,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         if isEnabled
         {
             startSilentAudio()
+            
+            // Verify timer is still valid - reschedule if needed
+            if timer == nil || timer!.isValid == false
+            {
+                rescheduleNextFact()
+            } // if
         } // if
     } // appDidEnterBackground
     
@@ -532,36 +577,6 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
 
 
-    // -----------------------------------------
-
-    private func loadMaxSentences()
-    {
-        let defaults = UserDefaults.standard
-
-        if defaults.object(forKey: "maxSentences") != nil
-        {
-            maxSentences = defaults.integer(forKey: "maxSentences")
-            // print("Restored max sentences: \(maxSentences)")
-        } // if
-        else
-        {
-            // print("Using default max sentences: \(maxSentences)")
-        } // else
-    } // loadMaxSentences
-
-
-
-    // -----------------------------------------
-
-    func saveMaxSentences()
-    {
-        let defaults = UserDefaults.standard
-        defaults.set(maxSentences, forKey: "maxSentences")
-    } // saveMaxSentences
-
-
-
-    // -----------------------------------------
 
     private func loadMaxSpokenSentences()
     {
@@ -686,11 +701,35 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     // -----------------------------------------
 
+    private func loadHumorMode()
+    {
+        let defaults = UserDefaults.standard
+        
+        if defaults.object(forKey: "isHumorMode") != nil
+        {
+            isHumorMode = defaults.bool(forKey: "isHumorMode")
+        }
+    } // loadHumorMode
+    
+    
+    
+    // -----------------------------------------
+
+    func saveHumorMode()
+    {
+        let defaults = UserDefaults.standard
+        defaults.set(isHumorMode, forKey: "isHumorMode")
+    } // saveHumorMode
+    
+    
+    
+    // -----------------------------------------
+
     private func loadUsedFactTitles()
     {
         let defaults = UserDefaults.standard
         
-        // Try loading new format first (with categories)
+        // Try loading new format first (with categories and pageid)
         
         if let savedData = defaults.data(forKey: "usedFactTitlesWithCategories"),
            let savedTitles = try? JSONDecoder().decode([UsedFactTitle].self, from: savedData)
@@ -701,8 +740,9 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         else if let oldTitles = defaults.array(forKey: "usedFactTitles") as? [String]
         {
             // Migrate old format (titles only) to new format
+            // Use pageid=0 for migrated data since we don't have the pageid
 
-            usedFactTitles = Set(oldTitles.map { UsedFactTitle(title: $0, category: "Unknown") })
+            usedFactTitles = Set(oldTitles.map { UsedFactTitle(title: $0, category: "Unknown", pageid: 0) })
             // print("Migrated \(usedFactTitles.count) used fact titles from old format")
 
             // Save in new format
@@ -734,18 +774,59 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     // -----------------------------------------
 
-    private func isFactTitleUsed(_ title: String) -> Bool
+    private func loadCategoryArticleCounts()
     {
-        return usedFactTitles.contains(where: { $0.title == title })
-    } // isFactTitleUsed
+        let defaults = UserDefaults.standard
+        
+        if let savedData = defaults.data(forKey: "categoryArticleCounts"),
+           let timestamp = defaults.object(forKey: "categoryCountsTimestamp") as? Date,
+           let counts = try? JSONDecoder().decode([String: Int].self, from: savedData)
+        {
+            // Only use cached data if less than 24 hours old
+            if Date().timeIntervalSince(timestamp) < 24 * 60 * 60
+            {
+                categoryArticleCounts = counts
+                categoryCountsTimestamp = timestamp
+            }
+        }
+    } // loadCategoryArticleCounts
     
     
     
     // -----------------------------------------
 
-    private func markFactTitleAsUsed(_ title: String, category: String)
+    private func saveCategoryArticleCounts()
     {
-        let usedFact = UsedFactTitle(title: title, category: category)
+        let defaults = UserDefaults.standard
+        
+        if let encodedData = try? JSONEncoder().encode(categoryArticleCounts)
+        {
+            defaults.set(encodedData, forKey: "categoryArticleCounts")
+            defaults.set(Date(), forKey: "categoryCountsTimestamp")
+        }
+    } // saveCategoryArticleCounts
+    
+    
+    
+    // -----------------------------------------
+
+    private func isFactTitleUsed(_ title: String) -> Bool
+    {
+        return usedFactTitles.contains(where: { $0.title == title })
+    } // isFactTitleUsed
+    
+    private func isFactPageIdUsed(_ pageid: Int) -> Bool
+    {
+        return usedFactTitles.contains(where: { $0.pageid == pageid })
+    } // isFactPageIdUsed
+    
+    
+    
+    // -----------------------------------------
+
+    private func markFactTitleAsUsed(_ title: String, category: String, pageid: Int)
+    {
+        let usedFact = UsedFactTitle(title: title, category: category, pageid: pageid)
         usedFactTitles.insert(usedFact)
         saveUsedFactTitles()
     } // markFactTitleAsUsed
@@ -786,10 +867,22 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
     func fetchAndSpeakRandomFact() async
     {
-        await MainActor.run
+        // Prevent concurrent fetches - if already loading or speaking, skip this request
+        let shouldProceed = await MainActor.run
         {
+            if isLoadingFact || isSpeaking
+            {
+                return false
+            }
             isLoadingFact = true
+            return true
         } // MainActor
+        
+        guard shouldProceed else
+        {
+            // print("Skipping fetch - already loading or speaking")
+            return
+        }
 
         do
         {
@@ -798,9 +891,23 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             await MainActor.run
             {
                 isLoadingFact = false
+                
+                // Mark as used immediately to prevent duplicates in concurrent fetches
+                if fact.category != "Error"
+                {
+                    markFactTitleAsUsed(fact.title, category: fact.category, pageid: fact.pageid)
+                }
+                
                 factHistory.append(fact)
                 speakFact(fact)
             } // MainActor
+            
+            // Fetch article count for this category in background (for display)
+            let categoryWithUnderscores = fact.category.replacingOccurrences(of: " ", with: "_")
+            if await MainActor.run(body: { self.categoryArticleCounts[categoryWithUnderscores] }) == nil
+            {
+                _ = await validateCategory(categoryWithUnderscores)
+            }
         } // do
         catch
         {
@@ -814,7 +921,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                     title: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     text: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     url: URL(string: "https://en.wikipedia.org")!,
-                    category: "Error"
+                    category: "Error",
+                    pageid: 0
                 )
                 speakFact(errorFact)
             } // MainActor
@@ -828,100 +936,105 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     nonisolated private func fetchRandomWikipediaFact() async throws -> WikipediaFact
     {
         // Load categories and keywords from configuration
-        let categories = await MainActor.run { self.categoriesData.categories }
-        let negativeKeywords = await MainActor.run { self.categoriesData.negativeKeywords }
-        var maxSentences = await MainActor.run { self.maxSentences }
-
-        // Upper bound for automatically raising the sentence limit. Matches the
-        // range of the Settings stepper so the persisted value stays in range.
-        let sentenceLimitCeiling = 20
-
-        // Hard cap on total fetch attempts across all rounds. Keeps a single
-        // fetch short enough to complete within the OS background execution
-        // window, even if the user sets a very strict sentence limit.
-        let maxTotalAttempts = 30
-        var totalAttempts = 0
-
-        // Keep trying, raising the sentence limit if a full round of attempts
-        // fails only because facts kept exceeding the current limit.
-        while true
+        var categories = await MainActor.run { self.categoriesData.categories }
+        let isHumorModeEnabled = await MainActor.run { self.isHumorMode }
+        
+        // Filter to only humorous categories if Humor Mode is enabled
+        if isHumorModeEnabled
         {
-            var sawTooManySentences = false
-
-            // Try up to 10 times to get a usable article
-            for _ in 0..<10
+            categories = categories.filter { humorousCategories.contains($0) }
+            
+            // Fallback to all categories if no humorous ones are available
+            if categories.isEmpty
             {
-                // Stop if we have exhausted the overall attempt budget
-                guard totalAttempts < maxTotalAttempts else
-                {
-                    throw URLError(.cannotFindHost)
-                } // guard
+                categories = await MainActor.run { self.categoriesData.categories }
+            }
+        }
+        
+        let negativeKeywords = await MainActor.run { self.categoriesData.negativeKeywords }
 
-                totalAttempts += 1
+        // Try up to 30 times to get a usable article
+        for _ in 0..<30
+        {
+            // Pick a random category
+            let category = categories.randomElement() ?? "Science"
 
-                // Pick a random category
-                let category = categories.randomElement() ?? "Science"
-
-                // Fetch random page from category
-                let result = try await fetchFromCategory(category,
-                                                          negativeKeywords: negativeKeywords,
-                                                          maxSentences: maxSentences)
-
-                switch result
-                {
-                    case .found(let fact):
-                        return fact
-
-                    case .tooManySentences:
-                        sawTooManySentences = true
-
-                    case .filtered:
-                        break
-                } // switch
-            } // for
-
-            // If the round failed and at least one candidate was rejected purely
-            // for exceeding the sentence limit, raise the limit by 1, persist it,
-            // and try again. Otherwise give up.
-
-            guard sawTooManySentences, maxSentences < sentenceLimitCeiling else
+            // Fetch random page from category
+            if let fact = try await fetchFromCategory(category,
+                                                       negativeKeywords: negativeKeywords)
             {
-                throw URLError(.cannotFindHost)
-            } // guard
-
-            maxSentences += 1
-            let newLimit = maxSentences
-
-            await MainActor.run
-            {
-                self.maxSentences = newLimit
-                self.saveMaxSentences()
-            } // MainActor
-        } // while
+                return fact
+            }
+        } // for
+        
+        // If we couldn't find a suitable fact after 30 attempts, throw an error
+        throw URLError(.cannotFindHost)
     } // fetchRandomWikipediaFact
     
     
     
     // -----------------------------------------
 
-    // Outcome of a single fetch attempt. Distinguishes a rejection due to the
-    // sentence limit from other rejections so the caller can decide whether to
-    // raise the limit and retry.
 
-    private enum FactFetchResult
-    {
-        case found(WikipediaFact)
-        case tooManySentences
-        case filtered
-    } // FactFetchResult
 
 
 
     // -----------------------------------------
+    // -----------------------------------------
+
+    // Validates a Wikipedia category and returns the article count
+    // Returns nil if category is invalid or has no articles
+    
+    func validateCategory(_ category: String) async -> Int?
+    {
+        // Check cache first
+        if let cachedCount = await MainActor.run(body: { self.categoryArticleCounts[category] })
+        {
+            return cachedCount
+        }
+        
+        let urlString = "https://en.wikipedia.org/w/api.php?action=query&format=json&list=categorymembers&cmtitle=Category:\(category)&cmlimit=500&cmnamespace=0"
+        
+        guard let encodedURL = urlString.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: encodedURL) else
+        {
+            return nil
+        } // guard
+        
+        var request = URLRequest(url: url)
+        request.setValue("WikiCurios/1.0 (iOS app; contact: stewart.french@gmail.com)", 
+                         forHTTPHeaderField: "User-Agent")
+        
+        do
+        {
+            let (data, _) = try await URLSession.shared.data(for: request)
+            let categoryResponse = try JSONDecoder().decode(WikipediaCategoryResponse.self, from: data)
+            
+            let count = categoryResponse.query.categorymembers.count
+            if count > 0
+            {
+                // Cache the result
+                await MainActor.run
+                {
+                    self.categoryArticleCounts[category] = count
+                    self.saveCategoryArticleCounts()
+                }
+                return count
+            }
+            return nil
+        }
+        catch
+        {
+            return nil
+        }
+    } // validateCategory
+    
+    
+    
 
     nonisolated private func fetchFromCategory(_ category: String,
-                                                negativeKeywords: [String],
-                                                maxSentences: Int) async throws -> FactFetchResult
+                                                negativeKeywords: [String]) async throws -> WikipediaFact?
     {
         // Wikipedia API endpoint to get random pages from a category
         let urlString = "https://en.wikipedia.org/w/api.php?action=query&format=json&list=categorymembers&cmtitle=Category:\(category)&cmlimit=50&cmnamespace=0"
@@ -930,7 +1043,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             withAllowedCharacters: .urlQueryAllowed),
               let url = URL(string: encodedURL) else
         {
-            return .filtered
+            return nil
         } // guard
         
         var request = URLRequest(url: url)
@@ -944,13 +1057,13 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard !categoryResponse.query.categorymembers.isEmpty else
         {
-            return .filtered
+            return nil
         } // guard
 
         // Pick a random page from the category
         guard let randomMember = categoryResponse.query.categorymembers.randomElement() else
         {
-            return .filtered
+            return nil
         } // guard
         
         // Fetch the page summary
@@ -960,7 +1073,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard let summaryURL = URL(string: summaryURLString) else
         {
-            return .filtered
+            return nil
         } // guard
         
         var summaryRequest = URLRequest(url: summaryURL)
@@ -979,25 +1092,18 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             if combinedText.contains(keyword.lowercased())
             {
                 // print("Filtered out article containing '\(keyword)': \(summaryResponse.title)")
-                return .filtered
+                return nil
             } // if
         } // for
 
-        // Discard facts whose body exceeds the maximum sentence count
-
-        if sentenceCount(in: summaryResponse.extract) > maxSentences
-        {
-            // print("Filtered out article with too many sentences: \(summaryResponse.title)")
-            return .tooManySentences
-        } // if
-
-        // Check if we've already used this fact title
+        // Check if we've already used this fact (by pageid or title)
         let factTitle = summaryResponse.title
+        let factPageId = summaryResponse.pageid
         
-        if await MainActor.run(body: { self.isFactTitleUsed(factTitle) })
+        if await MainActor.run(body: { self.isFactPageIdUsed(factPageId) || self.isFactTitleUsed(factTitle) })
         {
-            // print("Filtered out duplicate fact: '\(factTitle)'")
-            return .filtered
+            // print("Filtered out duplicate fact: '\(factTitle)' (pageid: \(factPageId))")
+            return nil
         } // if
         
         // Create a fact from the title and extract
@@ -1009,7 +1115,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         
         guard let url = URL(string: wikiUrlString) else
         {
-            return .filtered
+            return nil
         } // guard
         
         // Format category name for display (remove underscores)
@@ -1019,9 +1125,10 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         let fact = WikipediaFact(title: summaryResponse.title,
                                  text: factText,
                                  url: url,
-                                 category: displayCategory)
+                                 category: displayCategory,
+                                 pageid: summaryResponse.pageid)
 
-        return .found(fact)
+        return fact
     } // fetchFromCategory
     
     
@@ -1051,16 +1158,27 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             return
         } // if
         
-        // If synthesizer is already speaking, stop it first and wait for it to stop
+        // If synthesizer is already speaking, stop it first and clean up state
         
-        if synthesizer.isSpeaking
+        if synthesizer.isSpeaking || isSpeaking
         {
             // print("DEBUG: Synthesizer was already speaking, stopping first")
+            
+            // Clean up any pending state from interrupted speech
+            pendingFactText = nil
+            factUtterance = nil
+            currentSpeakingTitle = ""
+            isSpeaking = false
+            
+            // Cancel speech start timeout if any
+            speechStartTimer?.invalidate()
+            speechStartTimer = nil
+            
             synthesizer.stopSpeaking(at: .immediate)
             
             // Wait briefly for the stop to complete
             
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)
             {
                 [weak self] in
                 self?.performSpeech(fact: fact)
@@ -1098,10 +1216,6 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             
             return
         } // if
-        
-        // Mark the title as used (use the stored title so the value recorded
-        // exactly matches the one checked in fetchFromCategory)
-        markFactTitleAsUsed(fact.title, category: fact.category)
         
         // Set the title immediately when we start speaking
         currentSpeakingTitle = fact.title
@@ -1541,10 +1655,16 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     {
         // print("DEBUG: didCancel called, utterance was: \(utterance.speechString.prefix(30))...")
         // print("DEBUG: Was intro: \(utterance.speechString == "Wikipedia"), was fact: \(utterance === factUtterance)")
+        
+        // Clean up all speech state
         isSpeaking = false
         currentSpeakingTitle = ""
         factUtterance = nil
         pendingFactText = nil
+        
+        // Cancel any pending speech start timeout
+        speechStartTimer?.invalidate()
+        speechStartTimer = nil
 
         // print("DEBUG: State after cancel - isSpeaking: \(isSpeaking), synthesizer.isSpeaking: \(synthesizer.isSpeaking)")
     } // speechSynthesizer didCancel
@@ -1558,6 +1678,7 @@ struct WikipediaRandomResponse: Codable, Sendable
 {
     let title   : String
     let extract : String
+    let pageid  : Int
     let content_urls: ContentUrls?
     
     struct ContentUrls: Codable, Sendable
@@ -1607,6 +1728,7 @@ struct WikipediaFact: Identifiable
     let text: String
     let url: URL
     let category: String
+    let pageid: Int
 } // struct WikipediaFact
 
 
@@ -1619,26 +1741,55 @@ struct WikipediaFact: Identifiable
     let id: UUID
     let title: String
     let category: String
+    let pageid: Int
     
-    init(title: String, category: String)
+    init(title: String, category: String, pageid: Int)
     {
         self.id = UUID()
         self.title = title
         self.category = category
+        self.pageid = pageid
     } // init
     
-    // Custom Hashable implementation - only hash title and category, not UUID
-    // This prevents duplicates when the same fact is added multiple times
+    // Custom decoder for backward compatibility with data that doesn't have pageid
+    init(from decoder: Decoder) throws
+    {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(UUID.self, forKey: .id)
+        self.title = try container.decode(String.self, forKey: .title)
+        self.category = try container.decode(String.self, forKey: .category)
+        // Default to 0 if pageid is missing (backward compatibility)
+        self.pageid = try container.decodeIfPresent(Int.self, forKey: .pageid) ?? 0
+    } // init(from:)
+    
+    private enum CodingKeys: String, CodingKey
+    {
+        case id, title, category, pageid
+    } // CodingKeys
+    
+    // Custom Hashable implementation - use pageid as primary identifier
+    // Fall back to title+category for backward compatibility with old data
     
     static func == (lhs: UsedFactTitle, rhs: UsedFactTitle) -> Bool
     {
+        // If both have valid pageids, compare those (most reliable)
+        if lhs.pageid > 0 && rhs.pageid > 0 {
+            return lhs.pageid == rhs.pageid
+        }
+        // Otherwise fall back to title+category comparison
         return lhs.title == rhs.title && lhs.category == rhs.category
     } // ==
     
     func hash(into hasher: inout Hasher)
     {
-        hasher.combine(title)
-        hasher.combine(category)
+        // Use pageid as primary hash if available
+        if pageid > 0 {
+            hasher.combine(pageid)
+        } else {
+            // Fall back to title+category for backward compatibility
+            hasher.combine(title)
+            hasher.combine(category)
+        }
     } // hash
 } // struct UsedFactTitle
 

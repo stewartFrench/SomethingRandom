@@ -16,6 +16,7 @@ struct SettingsView: View
 
     @State private var categoriesData: CategoriesData
     @State private var showingUsedFacts = false
+    @State private var showResetConfirmation = false
 
 
 
@@ -71,23 +72,18 @@ struct SettingsView: View
                     } // NavigationLink
                 } // Section
 
-                // Fact Length Section
+                // Humor Mode Section
 
-                Section(header: Text("Fact Length"))
+                Section(header: Text("Content Filter"))
                 {
-                    Stepper(value : $wikipediaManager.maxSentences,
-                            in    : 1...20)
-                    {
-                        Text("Discard fact if greater than \(wikipediaManager.maxSentences) " +
-                             (wikipediaManager.maxSentences == 1 ? "sentence" : "sentences"))
-                    } // Stepper
-                    .onChange(of: wikipediaManager.maxSentences)
-                    {
-                        oldValue, newValue in
-                        wikipediaManager.saveMaxSentences()
-                    } // onChange
-
-                    Text("Retrieved facts longer than this are skipped and another is fetched.")
+                    Toggle("Humor Mode", isOn: $wikipediaManager.isHumorMode)
+                        .onChange(of: wikipediaManager.isHumorMode)
+                        {
+                            oldValue, newValue in
+                            wikipediaManager.saveHumorMode()
+                        }
+                    
+                    Text("When enabled, only humorous and entertaining categories are used.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } // Section
@@ -160,16 +156,7 @@ struct SettingsView: View
                 {
                     Button("Reset to Defaults")
                     {
-                        do
-                        {
-                            try CategoriesData.resetToDefaults()
-                            categoriesData = CategoriesData.load()
-                            wikipediaManager.reloadCategories()
-                        } // do
-                        catch
-                        {
-                            // print("Failed to reset: \(error.localizedDescription)")
-                        } // catch
+                        showResetConfirmation = true
                     } // Button
                     .foregroundColor(.orange)
                 } // Section
@@ -190,6 +177,26 @@ struct SettingsView: View
             {
                 UsedFactsView(wikipediaManager: wikipediaManager)
             } // sheet
+            .alert("Reset to Defaults?", isPresented: $showResetConfirmation)
+            {
+                Button("Cancel", role: .cancel) { }
+                
+                Button("Reset", role: .destructive)
+                {
+                    do
+                    {
+                        try CategoriesData.resetToDefaults()
+                        categoriesData = CategoriesData.load()
+                        wikipediaManager.reloadCategories()
+                    } // do
+                    catch
+                    {
+                        // print("Failed to reset: \(error.localizedDescription)")
+                    } // catch
+                }
+            } message: {
+                Text("This will restore all categories to the default list and remove any custom categories you've added. This cannot be undone.")
+            }
         } // NavigationView
     } // body
 } // struct SettingsView
@@ -202,6 +209,15 @@ struct CategoriesEditorView: View
     @Binding var categoriesData: CategoriesData
     @ObservedObject var wikipediaManager: WikipediaManager
     @State private var newCategory: String = ""
+    @State private var isValidating: Bool = false
+    @State private var showAlert: Bool = false
+    @State private var alertTitle: String = ""
+    @State private var alertMessage: String = ""
+    @State private var selectedCategory: String?
+    @State private var showCategoryInfo: Bool = false
+    @State private var categoryToDelete: String?
+    @State private var showDeleteConfirmation: Bool = false
+    @State private var isUserCategory: Bool = false
 
 
 
@@ -256,26 +272,31 @@ struct CategoriesEditorView: View
 
                             Button(action:
                             {
-                                if let index = categoriesData.userAddedCategories.firstIndex(of: category)
-                                {
-                                    categoriesData.userAddedCategories.remove(at: index)
-
-                                    if let catIndex = categoriesData.categories.firstIndex(of: category)
-                                    {
-                                        categoriesData.categories.remove(at: catIndex)
-                                    } // if
-                                    
-                                    // Auto-save immediately
-                                    
-                                    try? categoriesData.save()
-                                    wikipediaManager.reloadCategories()
-                                } // if
+                                categoryToDelete = category
+                                isUserCategory = true
+                                showDeleteConfirmation = true
                             }) // Button
                             {
                                 Image(systemName: "trash")
                                     .foregroundColor(.red)
                             } // Button
+                            .buttonStyle(BorderlessButtonStyle())
                         } // HStack
+                        .contentShape(Rectangle())
+                        .onTapGesture
+                        {
+                            selectedCategory = category
+                            
+                            // Load article count first, then show alert
+                            Task
+                            {
+                                _ = await wikipediaManager.validateCategory(category)
+                                await MainActor.run
+                                {
+                                    showCategoryInfo = true
+                                }
+                            }
+                        }
                     } // ForEach
                 } // Section
             } // if
@@ -289,26 +310,68 @@ struct CategoriesEditorView: View
                     TextField("Add new category", text: $newCategory)
                         .textFieldStyle(RoundedBorderTextFieldStyle())
 
-                    Button("Add")
+                    Button(isValidating ? "Validating..." : "Add")
                     {
                         let trimmed = newCategory.trimmingCharacters(in: .whitespaces)
 
                         // Convert spaces to underscores for Wikipedia API compatibility
                         let categoryWithUnderscores = trimmed.replacingOccurrences(of: " ", with: "_")
 
-                        if !trimmed.isEmpty && !categoriesData.categories.contains(categoryWithUnderscores)
+                        if trimmed.isEmpty
                         {
-                            categoriesData.categories.append(categoryWithUnderscores)
-                            categoriesData.userAddedCategories.append(categoryWithUnderscores)
-                            newCategory = ""
-                            
-                            // Auto-save immediately
-                            
-                            try? categoriesData.save()
-                            wikipediaManager.reloadCategories()
-                        } // if
+                            return
+                        }
+                        
+                        // Check if category already exists
+                        if categoriesData.categories.contains(categoryWithUnderscores)
+                        {
+                            let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                            alertTitle = "Duplicate Category"
+                            alertMessage = "'\(displayName)' is already in your category list."
+                            showAlert = true
+                            return
+                        }
+                        
+                        isValidating = true
+                        
+                        Task
+                        {
+                            if let articleCount = await wikipediaManager.validateCategory(categoryWithUnderscores)
+                            {
+                                // Category is valid
+                                await MainActor.run
+                                {
+                                    categoriesData.categories.append(categoryWithUnderscores)
+                                    categoriesData.userAddedCategories.append(categoryWithUnderscores)
+                                    newCategory = ""
+                                    
+                                    // Auto-save immediately
+                                    try? categoriesData.save()
+                                    wikipediaManager.reloadCategories()
+                                    
+                                    // Show success alert
+                                    let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                                    alertTitle = "Category Added"
+                                    alertMessage = "'\(displayName)' is valid with \(articleCount) article\(articleCount == 1 ? "" : "s")."
+                                    showAlert = true
+                                    isValidating = false
+                                }
+                            }
+                            else
+                            {
+                                // Category is invalid
+                                await MainActor.run
+                                {
+                                    let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                                    alertTitle = "Invalid Category"
+                                    alertMessage = "'\(displayName)' was not found on Wikipedia or has no articles."
+                                    showAlert = true
+                                    isValidating = false
+                                }
+                            }
+                        }
                     } // Button
-                    .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty || isValidating)
                 } // HStack
             } // Section
 
@@ -329,26 +392,98 @@ struct CategoriesEditorView: View
 
                         Button(action:
                         {
-                            if let index = categoriesData.categories.firstIndex(of: category)
-                            {
-                                categoriesData.categories.remove(at: index)
-                                
-                                // Auto-save immediately
-                                
-                                try? categoriesData.save()
-                                wikipediaManager.reloadCategories()
-                            } // if
+                            categoryToDelete = category
+                            isUserCategory = false
+                            showDeleteConfirmation = true
                         }) // Button
                         {
                             Image(systemName: "trash")
                                 .foregroundColor(.red)
                         } // Button
+                        .buttonStyle(BorderlessButtonStyle())
                     } // HStack
+                    .contentShape(Rectangle())
+                    .onTapGesture
+                    {
+                        selectedCategory = category
+                        
+                        // Load article count first, then show alert
+                        Task
+                        {
+                            _ = await wikipediaManager.validateCategory(category)
+                            await MainActor.run
+                            {
+                                showCategoryInfo = true
+                            }
+                        }
+                    }
                 } // ForEach
             } // Section
         } // Form
         .navigationTitle("Manage Categories")
         .navigationBarTitleDisplayMode(.inline)
+        .alert(alertTitle, isPresented: $showAlert)
+        {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
+        .alert(selectedCategory?.replacingOccurrences(of: "_", with: " ") ?? "Category Info", isPresented: $showCategoryInfo)
+        {
+            Button("OK", role: .cancel) { }
+            
+            if let category = selectedCategory
+            {
+                Button("View on Wikipedia")
+                {
+                    if let url = URL(string: "https://en.wikipedia.org/wiki/Category:\(category)")
+                    {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+        } message: {
+            if let category = selectedCategory,
+               let count = wikipediaManager.categoryArticleCounts[category]
+            {
+                Text("This category has \(count) article\(count == 1 ? "" : "s").")
+            }
+        }
+        .alert("Delete Category?", isPresented: $showDeleteConfirmation)
+        {
+            Button("Cancel", role: .cancel) { }
+            
+            Button("Delete", role: .destructive)
+            {
+                guard let category = categoryToDelete else { return }
+                
+                if isUserCategory
+                {
+                    // Remove from user added categories
+                    if let index = categoriesData.userAddedCategories.firstIndex(of: category)
+                    {
+                        categoriesData.userAddedCategories.remove(at: index)
+                    }
+                }
+                
+                // Remove from main categories list
+                if let catIndex = categoriesData.categories.firstIndex(of: category)
+                {
+                    categoriesData.categories.remove(at: catIndex)
+                }
+                
+                // Auto-save immediately
+                try? categoriesData.save()
+                wikipediaManager.reloadCategories()
+                
+                categoryToDelete = nil
+            }
+        } message: {
+            if let category = categoryToDelete
+            {
+                Text("Are you sure you want to delete '\(category.replacingOccurrences(of: "_", with: " "))'?")
+            }
+        }
     } // body
 } // struct CategoriesEditorView
 
@@ -535,9 +670,19 @@ struct UsedFactsView: View
                                     .font(.body)
                                     .foregroundColor(.primary)
                                 
-                                Text("Category: \(usedFact.category)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                HStack(spacing: 4)
+                                {
+                                    Text("Category: \(usedFact.category)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    
+                                    if let count = wikipediaManager.categoryArticleCounts[usedFact.category.replacingOccurrences(of: " ", with: "_")]
+                                    {
+                                        Text("(\(count) articles)")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
                             } // VStack
                             
                             Spacer()

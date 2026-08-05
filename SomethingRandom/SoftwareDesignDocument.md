@@ -2,9 +2,9 @@
 ## WikiCurios (Curiosities From Wikipedia) iOS Application
 ## Built in Xcode as "SomethingRandom"
 
-**Version:** 1.0
+**Version:** 1.1
 
-**Date:** July 27, 2026
+**Date:** August 5, 2026
 
 **Author:** Stewart French, Claude Sonnet 4.5 by Anthropic
 
@@ -68,17 +68,23 @@ text-to-speech technology without requiring user interaction.
   - Random timing mode for unpredictable fact delivery
   - Background and standby operation
   - Curated content filtering (strange, curious, and odd topics only)
+  - **Humor Mode** - Toggle to use only humorous/entertaining categories
   - Negative content filtering (no murder, war, death, crime, etc)
   - Persistent state across app launches
   - Portrait-only orientation
   - Fact history display with clickable Wikipedia links
   - Category display for each fact (in history and used facts list)
+  - Article count display next to categories in main view
   - Share functionality for all facts
   - Dynamic title display during speech
   - Next fact time display (updates with slider and random toggle)
   - Stop speaking button for immediate interruption
-  - Duplicate fact prevention with persistent tracking
+  - **Wikipedia pageid-based duplicate prevention** with title fallback
+  - Spoken length control (1-20 sentences) with post-retrieval truncation
   - Comprehensive settings with category and keyword management
+  - **Category validation** with Wikipedia API verification and article counts
+  - **Enhanced category management** (tap for info, delete confirmation, duplicate detection)
+  - Reset to Defaults confirmation alert
   - Auto-save settings changes
   - View and manage used fact titles with categories and deletion support
 
@@ -191,13 +197,14 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
   - Fetch facts from Wikipedia API
   - Filter by curated categories (strange, curious, odd)
+  - Optional Humor Mode to use only humorous categories
   - Filter out negative content
-  - Check for duplicate facts
-  - Discard facts exceeding the user-set sentence limit
+  - Check for duplicate facts using Wikipedia pageid
+  - Truncate spoken output to user-configured sentence limit
   - Speak fact using configured voice
   - Display fact title during speaking
   - Store facts in history
-  - Mark fact titles as used
+  - Mark fact titles and pageids as used
 
 **Technical Details:**
 
@@ -213,10 +220,12 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
 **Requirements:**
 
-  - 50+ curated Wikipedia categories
+  - 60+ curated Wikipedia categories (validated against Wikipedia API)
   - Focus on: strange, curious, odd, unusual
+  - 25 humorous/entertaining categories for Humor Mode
   - Filter out: murder, war, death, crime, violence
   - Up to 10 retry attempts per fact
+  - Category namespace filtering (cmnamespace=0 for articles only, not subcategories)
 
 **Categories Include:**
 
@@ -357,7 +366,37 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - Cleared only when final utterance finishes
   - Identity check on utterance object
 
-### 4.10 Immediate Launch Behavior
+### 4.10 Humor Mode
+
+**Description:** Filter facts to only use humorous and entertaining categories.
+
+**Requirements:**
+
+  - Toggle button in Settings to enable/disable
+  - When enabled, only use 25 curated humorous categories
+  - Persists across app launches
+  - Visual feedback in Settings
+
+**Humorous Categories:**
+
+  - Absurdist_fiction, Catchphrases, Competitive_eating
+  - Conspiracy_theories, Exploding_animals, Food_and_drink_curiosities
+  - Hoaxes, Individual_animals, Internet_memes
+  - Ironic_and_humorous_awards, Jokes, Mockumentaries
+  - Mondegreens, Novelty_items, Parody_films
+  - Pranks, Puns, Running_gags
+  - Satire, Scandals, Stand-up_comedy
+  - Tall_tales, Unusual_achievements, Unusual_competitions
+  - Unusual_foods
+
+**Technical Details:**
+
+  - humorousCategories Set<String> property
+  - Filters categories array before random selection
+  - Saved to UserDefaults with key "isHumorMode"
+  - Does not affect custom user-added categories
+
+### 4.11 Immediate Launch Behavior
 
 **Description:** Speak one fact immediately when app launches.
 
@@ -374,15 +413,15 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - DispatchQueue.asyncAfter delay
   - scheduleNextFactAfterLaunch() method
 
-### 4.11 Duplicate Fact Prevention
+### 4.12 Duplicate Fact Prevention
 
-**Description:** Prevent the same fact from being spoken twice across all app sessions.
+**Description:** Prevent the same fact from being spoken twice across all app sessions using Wikipedia's permanent pageid.
 
 **Requirements:**
 
-  - Track all fact titles that have been spoken with their categories
-  - Store titles persistently across app launches
-  - Check each new fact against stored titles before accepting
+  - Track all fact pageids and titles that have been spoken with their categories
+  - Store pageids and titles persistently across app launches
+  - Check each new fact against stored pageids (primary) and titles (fallback) before accepting
   - Reject duplicate facts and fetch alternatives
   - Never expire or clear the duplicate list automatically
   - Display category with each fact for context
@@ -390,39 +429,52 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 **Technical Details:**
 
   - usedFactTitles Set<UsedFactTitle> property
-  - UsedFactTitle struct stores title, category, and UUID (for Identifiable)
-  - Custom Hashable implementation using only title + category (not UUID)
+  - UsedFactTitle struct stores title, category, **pageid**, and UUID (for Identifiable)
+  - Custom Hashable implementation prioritizes pageid over title+category
+    - If both facts have pageid > 0, compares pageids (most reliable)
+    - Otherwise falls back to title+category comparison (backward compatibility)
+  - Custom Codable decoder handles missing pageid in old data (defaults to 0)
   - This prevents duplicate entries when speech retries call markFactTitleAsUsed() multiple times
   - loadUsedFactTitles() loads from UserDefaults on init
   - saveUsedFactTitles() persists array to UserDefaults
-  - isFactTitleUsed() checks if title already spoken
-  - markFactTitleAsUsed() adds UsedFactTitle to set and saves
-  - fetchFromCategory() checks for duplicates before returning fact
-  - speakFact() marks title as used when speaking begins
-  - Both the duplicate check and the "mark as used" step use the exact Wikipedia article title, stored on WikipediaFact.title, so the compared and recorded strings always match
+  - isFactPageIdUsed() checks if pageid already spoken
+  - isFactTitleUsed() checks if title already spoken (fallback)
+  - markFactTitleAsUsed() adds UsedFactTitle with pageid to set and saves
+  - fetchFromCategory() checks for duplicates using both pageid and title before returning fact
+  - Marks fact as used immediately after fetch to prevent race conditions
+  - Both the duplicate check and the "mark as used" step use the exact Wikipedia article pageid and title
   - UserDefaults key: "usedFactTitlesWithCategories"
-  - Backward compatible with old "usedFactTitles" key (migrates automatically)
+  - Backward compatible with old "usedFactTitles" key and data without pageids (migrates automatically)
 
 **Benefits:**
 
-  - Never hear the same fact twice
+  - More reliable than title-based detection (pageids are permanent, titles can change)
+  - Never hear the same fact twice even if Wikipedia renames the article
   - Works across app restarts
   - Automatic and transparent to user
   - Integrates with existing retry logic
   - User can manage via settings (view, delete individual, clear all)
+  - Backward compatible with existing used facts data
 
-### 4.12 Settings Management
+### 4.13 Settings Management
 
-**Description:** Comprehensive settings interface for managing categories, negative keywords, and used fact titles.
+**Description:** Comprehensive settings interface for managing categories, negative keywords, humor mode, and used fact titles.
 
 **Requirements:**
 
-  - Manage Wikipedia categories (add, delete, view defaults)
+  - Humor Mode toggle in Content Filter section
+  - Spoken Length stepper (1-20 sentences)
+  - Manage Wikipedia categories (add with validation, delete, view defaults)
   - Manage negative keywords (add, delete, view defaults)
   - View and delete used fact titles
   - Browse Wikipedia categories via external link
-  - Reset categories and keywords to defaults
+  - Reset categories and keywords to defaults with confirmation
   - Auto-save all changes immediately
+  - Category validation with Wikipedia API before adding
+  - Display article counts for categories
+  - Tap category to view info and Wikipedia link
+  - Delete confirmation for categories
+  - Duplicate category detection
 
 **Technical Details:**
 
@@ -450,7 +502,12 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
   - My Categories section (user-added, deletable)
   - Add new category text field with Add button
+  - **Real-time Wikipedia validation** before adding (checks if category exists and has articles)
+  - **Duplicate detection** prevents adding existing categories
   - Default Categories section (deletable)
+  - **Tap any category** to view article count and Wikipedia link
+  - **Delete confirmation** alert before removing categories
+  - **Article count caching** (24-hour cache to minimize API calls)
   - Spaces converted to underscores for Wikipedia API
   - Auto-save on add/delete
 
@@ -527,28 +584,37 @@ SomethingRandom/
 
 #### 5.3.1 WikipediaFact (Struct)
 
-**Purpose:** Store fact text with Wikipedia URL and category
+**Purpose:** Store fact text with Wikipedia URL, category, and pageid
 
 **Properties:**
 
   - `id: UUID` - Unique identifier (auto-generated)
+  - `title: String` - Article title
   - `text: String` - Full fact text
   - `url: URL` - Wikipedia article URL
   - `category: String` - Wikipedia category name (for display)
+  - `pageid: Int` - Wikipedia page ID for reliable duplicate detection
 
 **Conformance:** Identifiable
 
 #### 5.3.2 UsedFactTitle (Struct)
 
-**Purpose:** Store used fact titles with categories for duplicate prevention
+**Purpose:** Store used fact titles with categories and pageids for duplicate prevention
 
 **Properties:**
 
   - `id: UUID` - Unique identifier (auto-generated)
   - `title: String` - Wikipedia article title
   - `category: String` - Wikipedia category name
+  - `pageid: Int` - Wikipedia page ID (0 for legacy data)
 
 **Conformance:** Codable, Hashable, Identifiable, Sendable
+
+**Custom Implementations:**
+
+  - Custom Hashable: Prioritizes pageid over title+category for hashing
+  - Custom Codable decoder: Defaults pageid to 0 for backward compatibility
+  - Custom equality: Compares pageids if both > 0, otherwise falls back to title+category
 
 #### 5.3.3 WikipediaRandomResponse (Struct)
 
@@ -558,6 +624,7 @@ SomethingRandom/
 
   - `title: String`   - Article title
   - `extract: String`   - Article summary text
+  - `pageid: Int`   - Wikipedia page ID
   - `content_urls: ContentUrls?`   - URLs object
 
 #### 5.3.4 WikipediaCategoryResponse (Struct)
@@ -578,7 +645,8 @@ SomethingRandom/
 @Published var isEnabled          : Bool
 @Published var frequencyMinutes   : Double
 @Published var isRandomTiming     : Bool
-@Published var maxSentences       : Int
+@Published var maxSpokenSentences : Int
+@Published var isHumorMode        : Bool
 @Published var availableVoices    : [AVSpeechSynthesisVoice]
 @Published var selectedVoice      : AVSpeechSynthesisVoice?
 @Published var isSpeaking         : Bool
@@ -587,12 +655,15 @@ SomethingRandom/
 @Published var currentSpeakingTitle : String
 @Published var isLoadingFact      : Bool
 @Published var factHistory        : [WikipediaFact]
+@Published var categoryArticleCounts: [String: Int]
 
 private let synthesizer           : AVSpeechSynthesizer
 private var timer                 : Timer?
 private var audioPlayer           : AVAudioPlayer?
 private var factUtterance         : AVSpeechUtterance?
 @Published private var usedFactTitles : Set<UsedFactTitle>
+private let humorousCategories    : Set<String>
+private var categoryCountsTimestamp: Date?
 
 var usedFactTitlesCount           : Int
 var usedFactTitlesList            : [UsedFactTitle]
@@ -601,10 +672,11 @@ var usedFactTitlesList            : [UsedFactTitle]
 **Key Methods:**
 
   - `fetchAndSpeakRandomFact()`   - Main fact retrieval and playback
-  - `fetchRandomWikipediaFact()`   - Select category and fetch; retries in rounds of 10 and raises the sentence limit if a round fails only due to the sentence filter
-  - `fetchFromCategory(_:negativeKeywords:maxSentences:)`   - Get random from category; returns a `FactFetchResult` (`.found`, `.tooManySentences`, or `.filtered`)
+  - `fetchRandomWikipediaFact()`   - Select category and fetch; applies Humor Mode filtering if enabled
+  - `fetchFromCategory(_:negativeKeywords:)`   - Get random from category; checks pageid and title for duplicates
+  - `truncateToSentenceLimit(_:limit:)`   - Truncate fact text to N sentences before speaking
   - `sentenceCount(in:)`   - Count sentences in text via `.bySentences` enumeration
-  - `speakFact(_:)`   - Text-to-speech with intro
+  - `speakFact(_:)`   - Text-to-speech with intro and sentence truncation
   - `startTimer()`   - Begin periodic fact playback
   - `stopTimer()`   - End periodic playback
   - `updateFrequency(_:)`   - Adjust timer interval
@@ -614,16 +686,22 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `startSilentAudio()`   - Begin silent loop
   - `stopSilentAudio()`   - End silent loop
   - `configureAudioSession()`   - Setup AVAudioSession
-  - `loadUsedFactTitles()`   - Restore used titles from UserDefaults
+  - `loadUsedFactTitles()`   - Restore used titles from UserDefaults (handles missing pageids)
   - `saveUsedFactTitles()`   - Persist used titles to UserDefaults
   - `isFactTitleUsed(_:)`   - Check if title already used
-  - `markFactTitleAsUsed(_:category:)`   - Mark title as used with category and save
+  - `isFactPageIdUsed(_:)`   - Check if pageid already used
+  - `markFactTitleAsUsed(_:category:pageid:)`   - Mark title and pageid as used with category and save
   - `removeUsedFactTitle(_:)`   - Remove single UsedFactTitle and save
   - `clearAllUsedFactTitles()`   - Clear all titles and save
   - `reloadCategories()`   - Reload categories from CategoriesData
+  - `validateCategory(_:)`   - Check if Wikipedia category exists and return article count (with 24hr cache)
+  - `loadCategoryArticleCounts()`   - Restore cached article counts from UserDefaults
+  - `saveCategoryArticleCounts()`   - Persist article counts to UserDefaults
   - `saveRandomTimingSetting()`   - Save random timing and update next fact time
-  - `loadMaxSentences()`   - Restore max sentence limit from UserDefaults
-  - `saveMaxSentences()`   - Persist max sentence limit to UserDefaults
+  - `loadMaxSpokenSentences()`   - Restore max spoken sentence limit from UserDefaults
+  - `saveMaxSpokenSentences()`   - Persist max spoken sentence limit to UserDefaults
+  - `loadHumorMode()`   - Restore Humor Mode setting from UserDefaults
+  - `saveHumorMode()`   - Persist Humor Mode setting to UserDefaults
 
 #### 5.3.6 ContentView (Struct)
 
@@ -662,24 +740,27 @@ var usedFactTitlesList            : [UsedFactTitle]
 
 **Components:**
 
+  - Content Filter section
+    - Humor Mode toggle
+  - Spoken Length section (stepper 1-20 sentences)
   - Navigate to Manage Categories (with count badge)
   - Navigate to Manage Negative Keywords (with count badge)
-  - Fact Length section (stepper to set the max sentence limit, range 1–20)
   - Information section (category/keyword statistics)
   - View Used Fact Titles button (with count badge)
-  - Reset to Defaults button
+  - Reset to Defaults button (with confirmation alert)
   - Done button in toolbar
-  - Auto-saves all changes via child views (max sentence limit saved on change)
+  - Auto-saves all changes via child views
 
 **State:**
 
   - `@ObservedObject var wikipediaManager: WikipediaManager`
   - `@State private var categoriesData: CategoriesData`
   - `@State private var showingUsedFacts: Bool`
+  - `@State private var showResetConfirmation: Bool`
 
 #### 5.3.8 CategoriesEditorView (Struct)
 
-**Purpose:** Manage Wikipedia categories
+**Purpose:** Manage Wikipedia categories with validation and article counts
 
 **Components:**
 
@@ -687,18 +768,34 @@ var usedFactTitlesList            : [UsedFactTitle]
   - My Categories section (user-added with delete buttons)
   - Add new category text field with Add button
   - Default Categories section (deletable)
+  - Category info alerts (article count and Wikipedia link)
+  - Delete confirmation alerts
 
 **State:**
 
   - `@Binding var categoriesData: CategoriesData`
   - `@ObservedObject var wikipediaManager: WikipediaManager`
   - `@State private var newCategory: String`
+  - `@State private var isValidating: Bool`
+  - `@State private var showAlert: Bool`
+  - `@State private var alertTitle: String`
+  - `@State private var alertMessage: String`
+  - `@State private var selectedCategory: String?`
+  - `@State private var showCategoryInfo: Bool`
+  - `@State private var categoryToDelete: String?`
+  - `@State private var showDeleteConfirmation: Bool`
 
 **Behavior:**
 
+  - Validates categories with Wikipedia API before adding
+  - Shows success alert with article count when category is valid
+  - Shows error alert when category is invalid or already exists
+  - Tap any category to load article count and show info alert
+  - Delete confirmation required before removing categories
   - Auto-saves on every add/delete
   - Converts spaces to underscores for Wikipedia API
   - Reloads WikipediaManager after changes
+  - Caches article counts for 24 hours
 
 #### 5.3.9 KeywordsEditorView (Struct)
 
@@ -825,31 +922,29 @@ var usedFactTitlesList            : [UsedFactTitle]
 
 **Duplicate Fact Filter:**
 
-  - Checks title against Set of used titles
+  - Checks pageid (primary) and title (fallback) against Set of used facts
   - Persistent storage across app sessions
   - Rejects previously spoken facts
+  - Marks fact as used immediately after fetch to prevent race conditions
   - Logs rejected duplicates for debugging
-  - No expiration or limit on stored titles
+  - No expiration or limit on stored facts
+  - Backward compatible with title-only duplicate detection
 
-**Sentence Length Filter (Retrieval):**
+**Humor Mode Filter:**
 
-  - User-configurable maximum sentence count (`maxSentences`, default 5, range 1–20)
-  - Sentence count measured on the article extract via `.bySentences` enumeration
-  - Facts exceeding the limit are discarded and never spoken or recorded as used
-  - If a full round of 10 attempts fails only because of this filter, the limit is
-    raised by 1 (persisted) and fetching retries; escalation is capped at 20
-  - A hard cap of 30 total fetch attempts bounds how long a single fetch can run,
-    so it completes within the OS background execution window even at a strict limit
-  - Rejections for other reasons (keyword, duplicate) do not raise the limit
+  - Optional filter that restricts to 25 humorous/entertaining categories
+  - Applied before category selection when enabled
+  - Does not affect custom user-added categories
+  - Persists across app launches
 
 **Spoken Length Truncation:**
 
-  - User-configurable maximum spoken sentences (`maxSpokenSentences`, default 5, range 1–20)
+  - User-configurable maximum spoken sentences (`maxSpokenSentences`, default 3, range 1–20)
   - Applied after fact is retrieved and before speech synthesis
   - Truncates fact text to first N sentences using `.bySentences` enumeration
   - Full fact text stored in history, but only truncated portion is spoken
-  - Independent from retrieval filter - allows retrieving longer facts but speaking less
-  - More efficient than discard approach - uses first acceptable fact without retries
+  - More efficient than retrieval-time filtering - uses first acceptable fact without retries
+  - No auto-escalation needed since truncation happens post-retrieval
 
 **Quality Assurance:**
 
@@ -881,18 +976,23 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - `frequencyMinutes`   - Double value for timer interval
   - `isRandomTiming`   - Boolean for random timing mode
-  - `maxSentences`   - Int value for the maximum fact sentence limit
+  - `maxSpokenSentences`   - Int value for the maximum spoken sentence limit (default 3)
+  - `isHumorMode`   - Boolean for Humor Mode filter
   - `selectedVoiceIdentifier`   - String for voice persistence
-  - `usedFactTitlesWithCategories`   - JSON encoded array of UsedFactTitle for duplicate prevention
+  - `usedFactTitlesWithCategories`   - JSON encoded array of UsedFactTitle (with pageids) for duplicate prevention
+  - `categoryArticleCounts`   - JSON encoded dictionary of cached article counts
+  - `categoryCountsTimestamp`   - Date timestamp for cache expiration (24 hours)
   - `usedFactTitles`   - Legacy key (migrated to usedFactTitlesWithCategories)
 
 **Save Points:**
 
   - When frequency slider changes
   - When random button toggled
-  - When the sentence limit stepper changes, or when it is auto-raised during fetching
+  - When spoken sentence limit stepper changes
+  - When Humor Mode toggle changes
   - When voice selection changes
-  - When each fact is spoken (title marked as used)
+  - When each fact is spoken (title and pageid marked as used)
+  - When category article counts are fetched (cached for 24 hours)
 
 **Load Points:**
 
@@ -1257,9 +1357,12 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 **Handled:**
 
   - Network failures (error message spoken)
-  - All categories exhausted (tries 10 times per round)
-  - Sentence limit too low to find a fact (limit auto-raised by 1 per failed round, capped at 20)
-  - Runaway fetching (hard cap of 30 total attempts keeps a fetch within the background window)
+  - All categories exhausted (tries 10 times)
+  - All facts in a category already used (tries different category)
+  - Invalid Wikipedia categories (validation prevents adding)
+  - Duplicate category additions (alert prevents duplicates)
+  - Missing pageid in legacy data (defaults to 0, uses title fallback)
+  - Article count cache expiration (refreshes after 24 hours)
   - No voices available (fallback)
   - Empty fact history (placeholder text)
   - UserDefaults corruption (defaults used)
@@ -1303,6 +1406,26 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 ---
 
 ## Appendix A: Version History
+
+**Version 1.1 (August 5, 2026)**
+
+  - **Wikipedia pageid-based duplicate detection** (more reliable than title-only)
+  - **Humor Mode** - Toggle to filter to only humorous/entertaining categories
+  - **Removed Fact Length filter** (retrieval-time sentence filtering)
+  - **Enhanced Spoken Length** - Now only post-retrieval truncation (more efficient)
+  - **Category validation** - Wikipedia API verification before adding categories
+  - **Article count display** - Shows article counts next to categories in main view
+  - **Enhanced category management**:
+    - Tap category to view article count and Wikipedia link
+    - Delete confirmation before removing categories
+    - Duplicate category detection with alert
+    - 24-hour article count caching
+  - **Reset to Defaults confirmation** - Alert before resetting categories
+  - **Dynamic article count loading** - Loads before showing category info alert
+  - Backward compatibility with legacy data (title-only duplicates, missing pageids)
+  - Validated all 60+ categories against Wikipedia API
+  - Bug fixes for duplicate fact race conditions
+  - Improved Settings UI organization
 
 **Version 1.0 (July 26, 2026)**
 
