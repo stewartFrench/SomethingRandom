@@ -9,6 +9,7 @@ import SwiftUI
 
 
 // ------------
+
 struct SettingsView: View
 {
     @ObservedObject var wikipediaManager: WikipediaManager
@@ -21,6 +22,7 @@ struct SettingsView: View
 
 
     // -----------------------------------------
+
     init(wikipediaManager: WikipediaManager)
     {
         self.wikipediaManager = wikipediaManager
@@ -30,6 +32,7 @@ struct SettingsView: View
 
 
     // -----------------------------------------
+
     var body: some View
     {
         NavigationView
@@ -67,6 +70,24 @@ struct SettingsView: View
                             Spacer()
 
                             Text("\(categoriesData.negativeKeywords.count)")
+                                .foregroundColor(.secondary)
+                        } // HStack
+                    } // NavigationLink
+                } // Section
+
+                // Humorous Categories Management
+
+                Section
+                {
+                    NavigationLink(destination: HumorousCategoriesEditorView(categoriesData: $categoriesData, wikipediaManager: wikipediaManager))
+                    {
+                        HStack
+                        {
+                            Text("Manage Humorous Categories")
+
+                            Spacer()
+
+                            Text("\(categoriesData.humorousCategories.count)")
                                 .foregroundColor(.secondary)
                         } // HStack
                     } // NavigationLink
@@ -204,6 +225,7 @@ struct SettingsView: View
 
 
 // ------------
+
 struct CategoriesEditorView: View
 {
     @Binding var categoriesData: CategoriesData
@@ -222,6 +244,7 @@ struct CategoriesEditorView: View
 
 
     // -----------------------------------------
+
     var body: some View
     {
         Form
@@ -490,6 +513,295 @@ struct CategoriesEditorView: View
 
 
 // ------------
+
+struct HumorousCategoriesEditorView: View
+{
+    @Binding var categoriesData: CategoriesData
+    @ObservedObject var wikipediaManager: WikipediaManager
+    @State private var newCategory: String = ""
+    @State private var isValidating: Bool = false
+    @State private var showAlert: Bool = false
+    @State private var alertTitle: String = ""
+    @State private var alertMessage: String = ""
+    @State private var selectedCategory: String?
+    @State private var showCategoryInfo: Bool = false
+    @State private var categoryToDelete: String?
+    @State private var showDeleteConfirmation: Bool = false
+    @State private var isUserCategory: Bool = false
+
+
+
+    // -----------------------------------------
+
+    var body: some View
+    {
+        Form
+        {
+            // Browse Wikipedia Categories Link
+
+            Section
+            {
+                Link(destination: URL(string: "https://en.wikipedia.org/wiki/Portal:Contents/Categories")!)
+                {
+                    HStack
+                    {
+                        Image(systemName: "safari")
+                            .foregroundColor(.blue)
+
+                        Text("Browse Wikipedia Categories")
+                            .foregroundColor(.blue)
+
+                        Spacer()
+
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                    } // HStack
+                } // Link
+            } // Section
+
+            // User Added Humorous Categories Section
+
+            if !categoriesData.userAddedHumorousCategories.isEmpty
+            {
+                Section(header: Text("My Humorous Categories"))
+                {
+                    ForEach(categoriesData.userAddedHumorousCategories.sorted(), id: \.self)
+                    {
+                        category in
+
+                        HStack
+                        {
+                            Image(systemName: "person.fill")
+                                .font(.caption)
+                                .foregroundColor(.blue)
+
+                            Text(category.replacingOccurrences(of: "_", with: " "))
+                                .font(.body)
+
+                            Spacer()
+
+                            Button(action:
+                            {
+                                categoryToDelete = category
+                                isUserCategory = true
+                                showDeleteConfirmation = true
+                            }) // Button
+                            {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.red)
+                            } // Button
+                            .buttonStyle(BorderlessButtonStyle())
+                        } // HStack
+                        .contentShape(Rectangle())
+                        .onTapGesture
+                        {
+                            selectedCategory = category
+                            
+                            // Load article count first, then show alert
+                            Task
+                            {
+                                _ = await wikipediaManager.validateCategory(category)
+                                await MainActor.run
+                                {
+                                    showCategoryInfo = true
+                                }
+                            }
+                        }
+                    } // ForEach
+                } // Section
+            } // if
+
+            // Add Humorous Category Section
+
+            Section
+            {
+                HStack
+                {
+                    TextField("Add new humorous category", text: $newCategory)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+
+                    Button(isValidating ? "Validating..." : "Add")
+                    {
+                        let trimmed = newCategory.trimmingCharacters(in: .whitespaces)
+
+                        // Convert spaces to underscores for Wikipedia API compatibility
+                        let categoryWithUnderscores = trimmed.replacingOccurrences(of: " ", with: "_")
+
+                        if trimmed.isEmpty
+                        {
+                            return
+                        }
+                        
+                        // Check if category already exists
+                        if categoriesData.humorousCategories.contains(categoryWithUnderscores)
+                        {
+                            let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                            alertTitle = "Duplicate Category"
+                            alertMessage = "'\(displayName)' is already in your humorous category list."
+                            showAlert = true
+                            return
+                        }
+                        
+                        isValidating = true
+                        
+                        Task
+                        {
+                            if let articleCount = await wikipediaManager.validateCategory(categoryWithUnderscores)
+                            {
+                                // Category is valid
+                                await MainActor.run
+                                {
+                                    categoriesData.humorousCategories.append(categoryWithUnderscores)
+                                    categoriesData.userAddedHumorousCategories.append(categoryWithUnderscores)
+                                    newCategory = ""
+                                    
+                                    // Auto-save immediately
+                                    try? categoriesData.save()
+                                    wikipediaManager.reloadCategories()
+                                    
+                                    // Show success alert
+                                    let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                                    alertTitle = "Category Added"
+                                    alertMessage = "'\(displayName)' is valid with \(articleCount) article\(articleCount == 1 ? "" : "s")."
+                                    showAlert = true
+                                    isValidating = false
+                                }
+                            }
+                            else
+                            {
+                                // Category is invalid
+                                await MainActor.run
+                                {
+                                    let displayName = categoryWithUnderscores.replacingOccurrences(of: "_", with: " ")
+                                    alertTitle = "Invalid Category"
+                                    alertMessage = "'\(displayName)' was not found on Wikipedia or has no articles."
+                                    showAlert = true
+                                    isValidating = false
+                                }
+                            }
+                        }
+                    } // Button
+                    .disabled(newCategory.trimmingCharacters(in: .whitespaces).isEmpty || isValidating)
+                } // HStack
+            } // Section
+
+            // Default Humorous Categories Section
+
+            Section(header: Text("Default Humorous Categories"))
+            {
+                ForEach(categoriesData.humorousCategories.filter { !categoriesData.userAddedHumorousCategories.contains($0) }.sorted(), id: \.self)
+                {
+                    category in
+
+                    HStack
+                    {
+                        Text(category.replacingOccurrences(of: "_", with: " "))
+                            .font(.body)
+
+                        Spacer()
+
+                        Button(action:
+                        {
+                            categoryToDelete = category
+                            isUserCategory = false
+                            showDeleteConfirmation = true
+                        }) // Button
+                        {
+                            Image(systemName: "trash")
+                                .foregroundColor(.red)
+                        } // Button
+                        .buttonStyle(BorderlessButtonStyle())
+                    } // HStack
+                    .contentShape(Rectangle())
+                    .onTapGesture
+                    {
+                        selectedCategory = category
+                        
+                        // Load article count first, then show alert
+                        Task
+                        {
+                            _ = await wikipediaManager.validateCategory(category)
+                            await MainActor.run
+                            {
+                                showCategoryInfo = true
+                            }
+                        }
+                    }
+                } // ForEach
+            } // Section
+        } // Form
+        .navigationTitle("Manage Humorous Categories")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert(alertTitle, isPresented: $showAlert)
+        {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage)
+        }
+        .alert(selectedCategory?.replacingOccurrences(of: "_", with: " ") ?? "Category Info", isPresented: $showCategoryInfo)
+        {
+            Button("OK", role: .cancel) { }
+            
+            if let category = selectedCategory
+            {
+                Button("View on Wikipedia")
+                {
+                    if let url = URL(string: "https://en.wikipedia.org/wiki/Category:\(category)")
+                    {
+                        UIApplication.shared.open(url)
+                    }
+                }
+            }
+        } message: {
+            if let category = selectedCategory,
+               let count = wikipediaManager.categoryArticleCounts[category]
+            {
+                Text("This category has \(count) article\(count == 1 ? "" : "s").")
+            }
+        }
+        .alert("Delete Category?", isPresented: $showDeleteConfirmation)
+        {
+            Button("Cancel", role: .cancel) { }
+            
+            Button("Delete", role: .destructive)
+            {
+                guard let category = categoryToDelete else { return }
+                
+                if isUserCategory
+                {
+                    // Remove from user added humorous categories
+                    if let index = categoriesData.userAddedHumorousCategories.firstIndex(of: category)
+                    {
+                        categoriesData.userAddedHumorousCategories.remove(at: index)
+                    }
+                }
+                
+                // Remove from main humorous categories list
+                if let catIndex = categoriesData.humorousCategories.firstIndex(of: category)
+                {
+                    categoriesData.humorousCategories.remove(at: catIndex)
+                }
+                
+                // Auto-save immediately
+                try? categoriesData.save()
+                wikipediaManager.reloadCategories()
+                
+                categoryToDelete = nil
+            }
+        } message: {
+            if let category = categoryToDelete
+            {
+                Text("Are you sure you want to delete '\(category.replacingOccurrences(of: "_", with: " "))'?")
+            }
+        }
+    } // body
+} // struct HumorousCategoriesEditorView
+
+
+
+// ------------
+
 struct KeywordsEditorView: View
 {
     @Binding var categoriesData: CategoriesData
@@ -499,6 +811,7 @@ struct KeywordsEditorView: View
 
 
     // -----------------------------------------
+
     var body: some View
     {
         Form
@@ -623,6 +936,7 @@ struct KeywordsEditorView: View
 
 
 // ------------
+
 struct UsedFactsView: View
 {
     @ObservedObject var wikipediaManager: WikipediaManager
@@ -632,6 +946,7 @@ struct UsedFactsView: View
 
 
     // -----------------------------------------
+
     var body: some View
     {
         NavigationView
@@ -747,6 +1062,7 @@ struct UsedFactsView: View
 
 
     // -----------------------------------------
+
     private func deleteTitle(at offsets: IndexSet)
     {
         let titles = wikipediaManager.usedFactTitlesList
@@ -761,6 +1077,7 @@ struct UsedFactsView: View
     
     
     // -----------------------------------------
+
     private func createShareText() -> String
     {
         let usedFacts = wikipediaManager.usedFactTitlesList
@@ -811,6 +1128,7 @@ struct UsedFactsView: View
     
     
     // -----------------------------------------
+
     private func createHTMLFile() -> URL
     {
         let html = createShareText()
@@ -832,6 +1150,7 @@ struct UsedFactsView: View
     
     
     // -----------------------------------------
+
     private func wikipediaURL(for title: String) -> URL
     {
         // Convert title to Wikipedia URL format

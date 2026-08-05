@@ -67,6 +67,33 @@
 
 
   ],
+  "humorousCategories": [
+    "Absurdist_fiction",
+    "Catchphrases",
+    "Competitive_eating",
+    "Conspiracy_theories",
+    "Constructed_languages",
+    "Entertainment",
+    "Exploding_animals",
+    "Fables",
+    "Festivals",
+    "Folklore",
+    "Hoaxes",
+    "Internet_memes",
+    "Ironic_and_humorous_awards",
+    "Jokes",
+    "Legendary_creatures",
+    "Mockumentaries",
+    "Mondegreens",
+    "Mythological_creatures",
+    "Mythology",
+    "Paradoxes",
+    "Parody_films",
+    "Puns",
+    "Running_gags",
+    "Satire",
+    "Urban_legends"
+  ],
   "negativeKeywords": [
     "abuse",
     "assassin",

@@ -229,11 +229,11 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
 **Categories Include:**
 
-  - Strange & Unusual: Paradoxes, Optical illusions, Urban legends
-  - Odd Science: Bioluminescence, Extremophiles, Carnivorous plants
-  - Bizarre Inventions: Obsolete tech, Failed products, Rube Goldberg
-  - Weird Geography: Ghost towns, Micronations, Sinkholes
-  - Curious Customs: Festivals, Superstitions, Folklore
+  - Strange & Unusual: Paradoxes, Urban legends, Unexplained phenomena
+  - Odd Science: Exploding animals, Fractals, Longevity
+  - Bizarre Inventions: Obsolete tech, Constructed languages
+  - Weird Geography: Ghost towns, Land art,
+  - Entertainment: Stand-up comedy, Jokes, Parody films
   - And many more...
 
 ### 4.3 Frequency Control
@@ -279,7 +279,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
   - Display all available English voices
   - Show voice name and language variant
-  - Default voice: Daniel (en-GB)
+  - Default voice: Samantha (en-US)
   - Persistent selection across app launches
 
 **Technical Details:**
@@ -373,28 +373,30 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 **Requirements:**
 
   - Toggle button in Settings to enable/disable
-  - When enabled, only use 25 curated humorous categories
+  - When enabled, only use curated humorous categories
+  - Manage humorous categories (add, delete, view defaults)
   - Persists across app launches
   - Visual feedback in Settings
 
-**Humorous Categories:**
+**Default Humorous Categories (25):**
 
   - Absurdist_fiction, Catchphrases, Competitive_eating
-  - Conspiracy_theories, Exploding_animals, Food_and_drink_curiosities
-  - Hoaxes, Individual_animals, Internet_memes
-  - Ironic_and_humorous_awards, Jokes, Mockumentaries
-  - Mondegreens, Novelty_items, Parody_films
-  - Pranks, Puns, Running_gags
-  - Satire, Scandals, Stand-up_comedy
-  - Tall_tales, Unusual_achievements, Unusual_competitions
-  - Unusual_foods
+  - Conspiracy_theories, Constructed_languages, Entertainment
+  - Exploding_animals, Fables, Festivals, Folklore, Hoaxes
+  - Internet_memes, Ironic_and_humorous_awards, Jokes
+  - Legendary_creatures, Mockumentaries, Mondegreens
+  - Mythological_creatures, Mythology, Paradoxes
+  - Parody_films, Puns, Running_gags, Satire, Urban_legends
 
 **Technical Details:**
 
-  - humorousCategories Set<String> property
+  - humorousCategories computed property from CategoriesData
+  - Combines default and user-added humorous categories
   - Filters categories array before random selection
   - Saved to UserDefaults with key "isHumorMode"
-  - Does not affect custom user-added categories
+  - Humorous categories stored in categories.json and documents directory
+  - HumorousCategoriesEditorView for category management
+  - Auto-migration from bundle when loading legacy data without humorousCategories
 
 ### 4.11 Immediate Launch Behavior
 
@@ -458,7 +460,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
 ### 4.13 Settings Management
 
-**Description:** Comprehensive settings interface for managing categories, negative keywords, humor mode, and used fact titles.
+**Description:** Comprehensive settings interface for managing categories, negative keywords, humorous categories, humor mode, and used fact titles.
 
 **Requirements:**
 
@@ -466,6 +468,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - Spoken Length stepper (1-20 sentences)
   - Manage Wikipedia categories (add with validation, delete, view defaults)
   - Manage negative keywords (add, delete, view defaults)
+  - Manage humorous categories (add with validation, delete, view defaults)
   - View and delete used fact titles
   - Browse Wikipedia categories via external link
   - Reset categories and keywords to defaults with confirmation
@@ -480,6 +483,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 
   - SettingsView: Main settings container with navigation
   - CategoriesEditorView: Dedicated view for category management
+  - HumorousCategoriesEditorView: Dedicated view for humorous category management
   - KeywordsEditorView: Dedicated view for keyword management
   - UsedFactsView: View and manage previously heard fact titles
   - Auto-save on every add/delete operation
@@ -492,11 +496,12 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
 **UI Components:**
 
   - Navigate to Manage Categories (shows count)
+  - Navigate to Manage Humorous Categories (shows count)
   - Navigate to Manage Negative Keywords (shows count)
   - Information section showing category/keyword counts
   - View Used Fact Titles button (shows count)
   - Reset to Defaults button
-  - Browse Wikipedia Categories link (in categories view)
+  - Browse Wikipedia Categories link (in category views)
 
 **Category Management:**
 
@@ -509,6 +514,15 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - **Delete confirmation** alert before removing categories
   - **Article count caching** (24-hour cache to minimize API calls)
   - Spaces converted to underscores for Wikipedia API
+  - Auto-save on add/delete
+
+**Humorous Category Management:**
+
+  - Same features as regular category management
+  - My Humorous Categories section (user-added, deletable)
+  - Add new humorous category text field with Add button
+  - Default Humorous Categories section (deletable)
+  - All validation, article counts, and delete confirmation features
   - Auto-save on add/delete
 
 **Keyword Management:**
@@ -662,7 +676,8 @@ private var timer                 : Timer?
 private var audioPlayer           : AVAudioPlayer?
 private var factUtterance         : AVSpeechUtterance?
 @Published private var usedFactTitles : Set<UsedFactTitle>
-private let humorousCategories    : Set<String>
+private var humorousCategories    : Set<String>  // Computed from CategoriesData
+private var categoriesData        : CategoriesData
 private var categoryCountsTimestamp: Date?
 
 var usedFactTitlesCount           : Int
@@ -744,6 +759,7 @@ var usedFactTitlesList            : [UsedFactTitle]
     - Humor Mode toggle
   - Spoken Length section (stepper 1-20 sentences)
   - Navigate to Manage Categories (with count badge)
+  - Navigate to Manage Humorous Categories (with count badge)
   - Navigate to Manage Negative Keywords (with count badge)
   - Information section (category/keyword statistics)
   - View Used Fact Titles button (with count badge)
@@ -797,7 +813,47 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Reloads WikipediaManager after changes
   - Caches article counts for 24 hours
 
-#### 5.3.9 KeywordsEditorView (Struct)
+#### 5.3.9 HumorousCategoriesEditorView (Struct)
+
+**Purpose:** Manage humorous Wikipedia categories with validation and article counts
+
+**Components:**
+
+  - Browse Wikipedia Categories link (opens Safari)
+  - My Humorous Categories section (user-added with delete buttons)
+  - Add new humorous category text field with Add button
+  - Default Humorous Categories section (deletable)
+  - Category info alerts (article count and Wikipedia link)
+  - Delete confirmation alerts
+
+**State:**
+
+  - `@Binding var categoriesData: CategoriesData`
+  - `@ObservedObject var wikipediaManager: WikipediaManager`
+  - `@State private var newCategory: String`
+  - `@State private var isValidating: Bool`
+  - `@State private var showAlert: Bool`
+  - `@State private var alertTitle: String`
+  - `@State private var alertMessage: String`
+  - `@State private var selectedCategory: String?`
+  - `@State private var showCategoryInfo: Bool`
+  - `@State private var categoryToDelete: String?`
+  - `@State private var showDeleteConfirmation: Bool`
+
+**Behavior:**
+
+  - Same as CategoriesEditorView but manages humorousCategories
+  - Validates categories with Wikipedia API before adding
+  - Shows success alert with article count when category is valid
+  - Shows error alert when category is invalid or already exists
+  - Tap any category to load article count and show info alert
+  - Delete confirmation required before removing categories
+  - Auto-saves on every add/delete
+  - Converts spaces to underscores for Wikipedia API
+  - Reloads WikipediaManager after changes
+  - Caches article counts for 24 hours
+
+#### 5.3.10 KeywordsEditorView (Struct)
 
 **Purpose:** Manage negative keywords
 
@@ -819,7 +875,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Automatically lowercases keywords
   - Reloads WikipediaManager after changes
 
-#### 5.3.10 UsedFactsView (Struct)
+#### 5.3.11 UsedFactsView (Struct)
 
 **Purpose:** View, share, and delete used fact titles
 
@@ -853,9 +909,9 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `wikipediaURL(for:)` - Converts title to Wikipedia URL
   - `deleteTitle(at:)` - Removes individual title from set
 
-#### 5.3.11 CategoriesData (Struct)
+#### 5.3.12 CategoriesData (Struct)
 
-**Purpose:** Model for categories and keywords with persistence
+**Purpose:** Model for categories, humorous categories, and keywords with persistence
 
 **Properties:**
 
@@ -863,18 +919,31 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `negativeKeywords: [String]` - All active keywords
   - `userAddedCategories: [String]` - User-added categories
   - `userAddedKeywords: [String]` - User-added keywords
+  - `humorousCategories: [String]` - All active humorous categories
+  - `userAddedHumorousCategories: [String]` - User-added humorous categories
 
 **Methods:**
 
   - `static func load() -> CategoriesData` - Load from file or defaults
   - `func save() throws` - Persist to documents directory
   - `static func resetToDefaults() throws` - Delete custom file
+  - `private static func loadFromDocumentsDirectory() -> CategoriesData?` - Load with migration
+  - `private static func loadFromBundle() -> CategoriesData` - Load from app bundle
 
 **Persistence:**
 
   - Saves to documents directory as categories.json
   - Falls back to default categories.json from bundle
   - Tracks user additions separately for UI display
+  - Auto-migrates humorousCategories from bundle if missing in saved data
+
+**Migration:**
+
+  - Custom Codable decoder makes all fields optional for backward compatibility
+  - Missing humorousCategories defaults to empty array
+  - loadFromDocumentsDirectory() checks if humorousCategories is empty
+  - If empty, loads from bundle and copies humorousCategories
+  - Auto-saves migrated data to prevent re-migration
 
 ---
 
@@ -887,16 +956,18 @@ var usedFactTitlesList            : [UsedFactTitle]
 **Endpoints Used:**
 
 1. **Category Members**
+
    - `/w/api.php?action=query&format=json&list=categorymembers`
    - Returns list of articles in a category
 
 2. **Page Summary**
+
    - `/api/rest_v1/page/summary/{title}`
    - Returns article title, extract, and URL
 
 **Request Headers:**
 
-  - User-Agent: "WikiCurios/1.0 (iOS app; contact: {email})"
+  - User-Agent: "WikiCurios/1.0 (iOS app; contact: stewart.french@gmail.com)"
   - Required by Wikipedia API etiquette
 
 **Error Handling:**
@@ -1411,6 +1482,11 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 
   - **Wikipedia pageid-based duplicate detection** (more reliable than title-only)
   - **Humor Mode** - Toggle to filter to only humorous/entertaining categories
+  - **Manageable Humorous Categories** - Add, delete, and customize categories used in Humor Mode
+    - 25 default humorous categories stored in categories.json
+    - HumorousCategoriesEditorView for full management
+    - Same features as regular categories (validation, article counts, tap for info)
+    - Auto-migration from bundle when loading legacy data
   - **Removed Fact Length filter** (retrieval-time sentence filtering)
   - **Enhanced Spoken Length** - Now only post-retrieval truncation (more efficient)
   - **Category validation** - Wikipedia API verification before adding categories
@@ -1422,7 +1498,7 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
     - 24-hour article count caching
   - **Reset to Defaults confirmation** - Alert before resetting categories
   - **Dynamic article count loading** - Loads before showing category info alert
-  - Backward compatibility with legacy data (title-only duplicates, missing pageids)
+  - Backward compatibility with legacy data (title-only duplicates, missing pageids, missing humorousCategories)
   - Validated all 60+ categories against Wikipedia API
   - Bug fixes for duplicate fact race conditions
   - Improved Settings UI organization

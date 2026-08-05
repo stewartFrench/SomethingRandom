@@ -10,30 +10,39 @@ import Foundation
 
 // ------------
 // Model for loading categories and negative keywords from JSON
+
 struct CategoriesData: Codable, Sendable
 {
-    var categories          : [String]
-    var negativeKeywords    : [String]
-    var userAddedCategories : [String]
-    var userAddedKeywords   : [String]
+    var categories                  : [String]
+    var negativeKeywords            : [String]
+    var userAddedCategories         : [String]
+    var userAddedKeywords           : [String]
+    var humorousCategories          : [String]
+    var userAddedHumorousCategories : [String]
     
     
     // -----------------------------------------
+
     init(
-                categories: [String], 
-          negativeKeywords: [String], 
-       userAddedCategories: [String] = [], 
-         userAddedKeywords: [String] = [])
+                       categories: [String], 
+                 negativeKeywords: [String], 
+              userAddedCategories: [String] = [], 
+                userAddedKeywords: [String] = [],
+               humorousCategories: [String] = [],
+       userAddedHumorousCategories: [String] = [])
     {
         self.categories = categories
         self.negativeKeywords = negativeKeywords
         self.userAddedCategories = userAddedCategories
         self.userAddedKeywords = userAddedKeywords
+        self.humorousCategories = humorousCategories
+        self.userAddedHumorousCategories = userAddedHumorousCategories
     } // init
     
     
     
     // -----------------------------------------
+
     init(from decoder: Decoder) throws
     {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -43,11 +52,14 @@ struct CategoriesData: Codable, Sendable
         // These fields are optional for backward compatibility
         userAddedCategories = try container.decodeIfPresent([String].self, forKey: .userAddedCategories) ?? []
         userAddedKeywords = try container.decodeIfPresent([String].self, forKey: .userAddedKeywords) ?? []
+        humorousCategories = try container.decodeIfPresent([String].self, forKey: .humorousCategories) ?? []
+        userAddedHumorousCategories = try container.decodeIfPresent([String].self, forKey: .userAddedHumorousCategories) ?? []
     } // init
     
     
     
     // -----------------------------------------
+
     static func load() -> CategoriesData
     {
         // Try to load from documents directory first (user customizations)
@@ -65,6 +77,7 @@ struct CategoriesData: Codable, Sendable
     
     
     // -----------------------------------------
+
     private static func loadFromDocumentsDirectory() -> CategoriesData?
     {
         guard let documentsURL = FileManager.default.urls(
@@ -86,7 +99,18 @@ struct CategoriesData: Codable, Sendable
         {
             let data = try Data(contentsOf: fileURL)
             let decoder = JSONDecoder()
-            let categoriesData = try decoder.decode(CategoriesData.self, from: data)
+            var categoriesData = try decoder.decode(CategoriesData.self, from: data)
+            
+            // Migrate humorousCategories from bundle if missing
+            if categoriesData.humorousCategories.isEmpty
+            {
+                let bundleData = loadFromBundle()
+                categoriesData.humorousCategories = bundleData.humorousCategories
+                
+                // Auto-save the migrated data
+                try? categoriesData.save()
+            }
+            
             // print("Loaded categories from documents directory")
             return categoriesData
         } // do
@@ -101,6 +125,7 @@ struct CategoriesData: Codable, Sendable
     
     
     // -----------------------------------------
+
     private static func loadFromBundle() -> CategoriesData
     {
         guard let url = Bundle.main.url(forResource   : "categories",
@@ -128,6 +153,7 @@ struct CategoriesData: Codable, Sendable
     
     
     // -----------------------------------------
+
     private static func createDefaultData() -> CategoriesData
     {
         return CategoriesData(
@@ -139,6 +165,7 @@ struct CategoriesData: Codable, Sendable
     
     
     // -----------------------------------------
+
     func save() throws
     {
         guard let documentsURL = FileManager.default.urls(
@@ -165,6 +192,7 @@ struct CategoriesData: Codable, Sendable
     
     
     // -----------------------------------------
+
     static func resetToDefaults() throws
     {
         guard let documentsURL = FileManager.default.urls(

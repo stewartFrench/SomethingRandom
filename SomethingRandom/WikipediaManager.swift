@@ -58,33 +58,10 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     private var categoryCountsTimestamp: Date?
     
     // Humorous categories for Humor Mode filtering
-    private let humorousCategories: Set<String> = [
-        "Absurdist_fiction",
-        "Catchphrases",
-        "Competitive_eating",
-        "Conspiracy_theories",
-        "Exploding_animals",
-        "Food_and_drink_curiosities",
-        "Hoaxes",
-        "Individual_animals",
-        "Internet_memes",
-        "Ironic_and_humorous_awards",
-        "Jokes",
-        "Mockumentaries",
-        "Mondegreens",
-        "Novelty_items",
-        "Parody_films",
-        "Pranks",
-        "Puns",
-        "Running_gags",
-        "Satire",
-        "Scandals",
-        "Stand-up_comedy",
-        "Tall_tales",
-        "Unusual_achievements",
-        "Unusual_competitions",
-        "Unusual_foods"
-    ]
+    private var humorousCategories: Set<String>
+    {
+        Set(categoriesData.humorousCategories + categoriesData.userAddedHumorousCategories)
+    }
     
     
     
@@ -335,6 +312,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     
     // -----------------------------------------
+
     private func configureAudioSession()
     {
         do
@@ -815,6 +793,9 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         return usedFactTitles.contains(where: { $0.title == title })
     } // isFactTitleUsed
     
+
+    // -----------------------------------------
+
     private func isFactPageIdUsed(_ pageid: Int) -> Bool
     {
         return usedFactTitles.contains(where: { $0.pageid == pageid })
@@ -1032,6 +1013,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     
     
+    // -----------------------------------------
 
     nonisolated private func fetchFromCategory(_ category: String,
                                                 negativeKeywords: [String]) async throws -> WikipediaFact?
@@ -1751,7 +1733,9 @@ struct WikipediaFact: Identifiable
         self.pageid = pageid
     } // init
     
+    // -----------------------------------------
     // Custom decoder for backward compatibility with data that doesn't have pageid
+
     init(from decoder: Decoder) throws
     {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -1762,11 +1746,13 @@ struct WikipediaFact: Identifiable
         self.pageid = try container.decodeIfPresent(Int.self, forKey: .pageid) ?? 0
     } // init(from:)
     
+    // ------------
     private enum CodingKeys: String, CodingKey
     {
         case id, title, category, pageid
     } // CodingKeys
     
+    // -----------------------------------------
     // Custom Hashable implementation - use pageid as primary identifier
     // Fall back to title+category for backward compatibility with old data
     
@@ -1780,6 +1766,8 @@ struct WikipediaFact: Identifiable
         return lhs.title == rhs.title && lhs.category == rhs.category
     } // ==
     
+    // -----------------------------------------
+
     func hash(into hasher: inout Hasher)
     {
         // Use pageid as primary hash if available
