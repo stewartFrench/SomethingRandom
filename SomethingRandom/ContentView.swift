@@ -16,7 +16,7 @@ import AVFoundation
 
 struct ContentView: View
 {
-    @StateObject private var wikipediaManager = WikipediaManager()
+    @StateObject private var wikipediaManager = WikipediaManager.shared
     @State private var showingShareSheet = false
     @State private var showingSettings = false
     

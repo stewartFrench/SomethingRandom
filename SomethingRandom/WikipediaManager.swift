@@ -18,6 +18,8 @@ import Combine
 
 class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 {
+    static let shared = WikipediaManager()
+    
     @Published var isEnabled          : Bool                       = false
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
@@ -67,7 +69,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     // -----------------------------------------
 
-    override init()
+    private override init()
     {
         // Load categories data before calling super.init
         categoriesData = CategoriesData.load()
@@ -115,14 +117,14 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             object: nil
         )
         
-        // Speak one fact on launch after a short delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0)
-        {
-            Task
-            {
-                await self.speakFactOnLaunch()
-            } // Task
-        } // DispatchQueue.main.asyncAfter
+        // Launch behavior disabled - users must tap Start to begin
+        // DispatchQueue.main.asyncAfter(deadline: .now() + 1.0)
+        // {
+        //     Task
+        //     {
+        //         await self.speakFactOnLaunch()
+        //     } // Task
+        // } // DispatchQueue.main.asyncAfter
     } // init
     
     
@@ -321,6 +323,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
 
             // Use .playback with .voicePrompt for reliable background audio and CarPlay compatibility
             // .mixWithOthers allows music to continue playing during speech
+            // Audio interruptions (like Siri) are handled via NotificationCenter observer
 
             try audioSession.setCategory(.playback, 
                                           mode: .voicePrompt, 
@@ -909,6 +912,77 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
             } // MainActor
         } // catch
     } // fetchAndSpeakRandomFact
+    
+    
+    
+    // -----------------------------------------
+    // Fetch and speak a single fact for Siri/Shortcuts without starting timer
+    
+    func fetchAndSpeakSingleFact() async
+    {
+        // Toggle behavior: if already speaking, stop instead of starting new fact
+        let shouldProceed = await MainActor.run
+        {
+            if isLoadingFact || isSpeaking
+            {
+                // Stop the current speech
+                stopSpeaking()
+                return false
+            }
+            isLoadingFact = true
+            return true
+        } // MainActor
+        
+        guard shouldProceed else
+        {
+            // Speech was stopped, return without fetching new fact
+            return
+        }
+
+        do
+        {
+            let fact = try await fetchRandomWikipediaFact()
+
+            await MainActor.run
+            {
+                isLoadingFact = false
+                
+                // Mark as used immediately to prevent duplicates in concurrent fetches
+                if fact.category != "Error"
+                {
+                    markFactTitleAsUsed(fact.title, category: fact.category, pageid: fact.pageid)
+                }
+                
+                factHistory.append(fact)
+                speakFact(fact)
+            } // MainActor
+            
+            // Fetch article count for this category in background (for display)
+            let categoryWithUnderscores = fact.category.replacingOccurrences(of: " ", with: "_")
+            if await MainActor.run(body: { self.categoryArticleCounts[categoryWithUnderscores] }) == nil
+            {
+                _ = await validateCategory(categoryWithUnderscores)
+            }
+        } // do
+        catch
+        {
+            await MainActor.run
+            {
+                isLoadingFact = false
+                // print("Failed to fetch Wikipedia fact: \(error)")
+
+                // Speak an error message
+                let errorFact = WikipediaFact(
+                    title: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
+                    text: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
+                    url: URL(string: "https://en.wikipedia.org")!,
+                    category: "Error",
+                    pageid: 0
+                )
+                speakFact(errorFact)
+            } // MainActor
+        } // catch
+    } // fetchAndSpeakSingleFact
     
     
     

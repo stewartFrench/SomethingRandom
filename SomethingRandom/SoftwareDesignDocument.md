@@ -398,24 +398,80 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - HumorousCategoriesEditorView for category management
   - Auto-migration from bundle when loading legacy data without humorousCategories
 
-### 4.11 Immediate Launch Behavior
+### 4.11 Siri Integration
 
-**Description:** Speak one fact immediately when app launches.
+**Description:** Invoke WikiCurios via Siri voice commands to speak a random Wikipedia fact.
 
 **Requirements:**
 
-  - Speak fact 1 second after app starts
-  - Auto-schedule next fact based on interval
-  - Enable background audio automatically
-  - Only once per launch
+  - Support "Hey Siri" voice activation
+  - Fetch and speak random fact via voice command
+  - Record spoken facts in Used Facts list
+  - Work without opening the app UI
+  - Support multiple phrase variations
+
+**Siri Phrases:**
+
+  - "WikiCurious in WikiCurios"
+  - "Get curious with WikiCurios"
+  - "WikiCurios"
+  - "Random fact in WikiCurios"
+  - "Tell me something from WikiCurios"
 
 **Technical Details:**
 
-  - hasSpokenOnLaunch flag
-  - DispatchQueue.asyncAfter delay
-  - scheduleNextFactAfterLaunch() method
+  - WikiCuriousIntent: AppIntent implementation
+  - WikiCuriousShortcuts: AppShortcutsProvider with predefined phrases
+  - Uses WikipediaManager.shared singleton for state access
+  - Calls fetchAndSpeakSingleFact() with toggle behavior
+  - **Toggle behavior**: If already speaking, stops speech instead of starting new fact
+  - If not speaking, fetches and speaks ONE fact per invocation
+  - @MainActor async execution
+  - openAppWhenRun = false (background execution)
+  - Returns empty result (no "Done" dialog)
+  - Integrates with existing duplicate prevention and fact history
+  - Does not affect app's enabled/disabled state or timer
 
-### 4.12 Duplicate Fact Prevention
+**Implementation:**
+
+  - WikiCuriousIntent.swift defines the App Intent
+  - WikipediaManager.shared provides singleton access
+  - WikipediaManager.fetchAndSpeakSingleFact() implements toggle logic:
+    - Checks if already speaking or loading
+    - If yes: calls stopSpeaking() and returns
+    - If no: fetches and speaks a fact
+  - ContentView uses shared instance via @StateObject
+  - Private init() prevents multiple WikipediaManager instances
+  - Info.plist configured for App Shortcuts
+
+**Voice Control:**
+
+  - Say "Hey Siri, WikiCurios" to start speaking a fact
+  - Say "Hey Siri, WikiCurios" again while speaking to stop immediately
+  - Same command acts as toggle: start when idle, stop when speaking
+  - Provides voice-controlled workaround for iOS speech interruption limitation
+
+### 4.12 Manual Start Behavior
+
+**Description:** User must manually start fact playback by tapping the "Start" button.
+
+**Requirements:**
+
+  - No automatic fact spoken on app launch
+  - User taps "Start" button to begin periodic playback
+  - Timer starts at configured interval (fixed or random)
+  - User taps "Stop" button to end periodic playback
+  - "Now" button speaks one fact immediately without affecting timer state
+
+**Technical Details:**
+
+  - Automatic launch behavior disabled (code commented out in init())
+  - hasSpokenOnLaunch flag still exists but unused
+  - startTimer() called when user taps "Start"
+  - stopTimer() called when user taps "Stop"
+  - fetchAndSpeakRandomFact() called when user taps "Now"
+
+### 4.13 Duplicate Fact Prevention
 
 **Description:** Prevent the same fact from being spoken twice across all app sessions using Wikipedia's permanent pageid.
 
@@ -458,7 +514,7 @@ interesting trivia while their phone is in their pocket, on a desk, or in standb
   - User can manage via settings (view, delete individual, clear all)
   - Backward compatible with existing used facts data
 
-### 4.13 Settings Management
+### 4.14 Settings Management
 
 **Description:** Comprehensive settings interface for managing categories, negative keywords, humorous categories, humor mode, and used fact titles.
 
@@ -585,6 +641,7 @@ SomethingRandom/
 ├── ContentView.swift              # Main UI view
 ├── SettingsView.swift             # Settings UI with categories/keywords management
 ├── WikipediaManager.swift         # Business logic and API integration
+├── WikiCuriousIntent.swift        # Siri App Intent integration
 ├── CategoriesData.swift           # Categories and keywords model
 ├── categories.json                # Default categories and keywords
 ├── Info.plist                     # App configuration
@@ -649,9 +706,59 @@ SomethingRandom/
 
   - `query: WikipediaQuery`   - Query results
 
-#### 5.3.5 WikipediaManager (Class)
+#### 5.3.5 WikiCuriousIntent (Struct)
 
-**Purpose:** Core application logic
+**Purpose:** Siri App Intent for voice-activated fact retrieval
+
+**Protocol Conformance:** AppIntent
+
+**Properties:**
+
+  - `static var title: LocalizedStringResource` - "Get WikiCurious"
+  - `static var description: IntentDescription?` - "Speak a random curiosity from Wikipedia"
+  - `static var openAppWhenRun: Bool` - false (runs in background)
+
+**Methods:**
+
+  - `@MainActor func perform() async throws -> some IntentResult`
+    - Accesses WikipediaManager.shared singleton
+    - Calls fetchAndSpeakRandomFact() asynchronously
+    - Returns dialog confirmation to user
+    - Integrates with existing duplicate prevention
+
+**Error Handling:**
+
+  - WikiCuriousError.managerNotFound - Custom error if manager unavailable
+
+#### 5.3.6 WikiCuriousShortcuts (Struct)
+
+**Purpose:** Define App Shortcuts for Siri integration
+
+**Protocol Conformance:** AppShortcutsProvider
+
+**Properties:**
+
+  - `static var appShortcuts: [AppShortcut]`
+    - Defines predefined Siri phrases
+    - Associates phrases with WikiCuriousIntent
+    - Sets short title and system image
+
+**Siri Phrases:**
+
+  - "WikiCurious in \(.applicationName)"
+  - "Get curious with \(.applicationName)"
+  - "\(.applicationName)"
+  - "Random fact in \(.applicationName)"
+  - "Tell me something from \(.applicationName)"
+
+#### 5.3.7 WikipediaManager (Class)
+
+**Purpose:** Core application logic (Singleton)
+
+**Singleton Access:**
+
+  - `static let shared = WikipediaManager()`
+  - `private override init()` - Prevents multiple instances
 
 **Properties:**
 
@@ -692,6 +799,8 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `truncateToSentenceLimit(_:limit:)`   - Truncate fact text to N sentences before speaking
   - `sentenceCount(in:)`   - Count sentences in text via `.bySentences` enumeration
   - `speakFact(_:)`   - Text-to-speech with intro and sentence truncation
+  - `fetchAndSpeakRandomFact()`   - Fetch and speak fact (used by timer and UI)
+  - `fetchAndSpeakSingleFact()`   - Toggle behavior: speak fact if idle, stop if speaking (used by Siri)
   - `startTimer()`   - Begin periodic fact playback
   - `stopTimer()`   - End periodic playback
   - `updateFrequency(_:)`   - Adjust timer interval
@@ -718,7 +827,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `loadHumorMode()`   - Restore Humor Mode setting from UserDefaults
   - `saveHumorMode()`   - Persist Humor Mode setting to UserDefaults
 
-#### 5.3.6 ContentView (Struct)
+#### 5.3.8 ContentView (Struct)
 
 **Purpose:** SwiftUI user interface
 
@@ -749,7 +858,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `createHTMLFile()` - Writes HTML to temporary file and returns URL for sharing
   - `voiceDisplayName(_:)` - Formats voice name with language code
 
-#### 5.3.7 SettingsView (Struct)
+#### 5.3.9 SettingsView (Struct)
 
 **Purpose:** Settings navigation and management
 
@@ -774,7 +883,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `@State private var showingUsedFacts: Bool`
   - `@State private var showResetConfirmation: Bool`
 
-#### 5.3.8 CategoriesEditorView (Struct)
+#### 5.3.10 CategoriesEditorView (Struct)
 
 **Purpose:** Manage Wikipedia categories with validation and article counts
 
@@ -813,7 +922,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Reloads WikipediaManager after changes
   - Caches article counts for 24 hours
 
-#### 5.3.9 HumorousCategoriesEditorView (Struct)
+#### 5.3.11 HumorousCategoriesEditorView (Struct)
 
 **Purpose:** Manage humorous Wikipedia categories with validation and article counts
 
@@ -853,7 +962,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Reloads WikipediaManager after changes
   - Caches article counts for 24 hours
 
-#### 5.3.10 KeywordsEditorView (Struct)
+#### 5.3.12 KeywordsEditorView (Struct)
 
 **Purpose:** Manage negative keywords
 
@@ -875,7 +984,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Automatically lowercases keywords
   - Reloads WikipediaManager after changes
 
-#### 5.3.11 UsedFactsView (Struct)
+#### 5.3.13 UsedFactsView (Struct)
 
 **Purpose:** View, share, and delete used fact titles
 
@@ -909,7 +1018,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `wikipediaURL(for:)` - Converts title to Wikipedia URL
   - `deleteTitle(at:)` - Removes individual title from set
 
-#### 5.3.12 CategoriesData (Struct)
+#### 5.3.14 CategoriesData (Struct)
 
 **Purpose:** Model for categories, humorous categories, and keywords with persistence
 
@@ -1478,8 +1587,18 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 
 ## Appendix A: Version History
 
-**Version 1.1 (August 5, 2026)**
+**Version 1.1 (August 16, 2026)**
 
+  - **Siri Integration** - Voice-activated fact retrieval via "Hey Siri"
+    - WikiCuriousIntent App Intent implementation
+    - Multiple Siri phrase variations supported
+    - Background execution without opening app UI
+    - **Toggle behavior**: Say "WikiCurios" to start, say it again to stop
+    - Speaks single fact without starting timer
+    - Returns empty result (no "Done" dialog)
+    - Integrates with existing duplicate prevention and fact history
+    - WikipediaManager singleton pattern for shared state access
+    - Provides voice-controlled workaround for iOS speech interruption limitation
   - **Wikipedia pageid-based duplicate detection** (more reliable than title-only)
   - **Humor Mode** - Toggle to filter to only humorous/entertaining categories
   - **Manageable Humorous Categories** - Add, delete, and customize categories used in Humor Mode
@@ -1498,6 +1617,7 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
     - 24-hour article count caching
   - **Reset to Defaults confirmation** - Alert before resetting categories
   - **Dynamic article count loading** - Loads before showing category info alert
+  - **Manual start behavior** - Removed automatic fact on launch, user must tap "Start"
   - Backward compatibility with legacy data (title-only duplicates, missing pageids, missing humorousCategories)
   - Validated all 60+ categories against Wikipedia API
   - Bug fixes for duplicate fact race conditions

@@ -58,6 +58,7 @@ class AppDelegate: NSObject, UIApplicationDelegate
             let audioSession = AVAudioSession.sharedInstance()
             
             // Use .playback category to ensure audio plays even in silent mode
+            // Audio interruptions (like Siri) are handled via NotificationCenter observer
             
             try audioSession.setCategory(.playback,
                                     mode    : .voicePrompt,

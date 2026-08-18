@@ -8,5 +8,9 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSAppClipRequestLocationConfirmation</key>
+	<false/>
+	<key>NSSupportsLiveActivities</key>
+	<false/>
 </dict>
 </plist>
