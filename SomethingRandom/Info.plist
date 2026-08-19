@@ -12,5 +12,7 @@
 	<false/>
 	<key>NSSupportsLiveActivities</key>
 	<false/>
+	<key>UIRequiresFullScreen</key>
+	<false/>
 </dict>
 </plist>

@@ -28,7 +28,17 @@ struct SomethingRandomApp: App
             ContentView()
                 .onAppear
                 {
-                    AppDelegate.orientationLock = .portrait
+                    // Set orientation based on device type
+                    if UIDevice.current.userInterfaceIdiom == .pad
+                    {
+                        // iPad: Allow all orientations
+                        AppDelegate.orientationLock = .all
+                    }
+                    else
+                    {
+                        // iPhone: Portrait only
+                        AppDelegate.orientationLock = .portrait
+                    }
                 } // onAppear
         } // WindowGroup
     } // body
