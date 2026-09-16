@@ -445,13 +445,13 @@ struct ContentView: View
             <style>
                 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 20px; }
                 h1 { color: #333; }
-                .fact { margin-bottom: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 8px; }
-                .fact-number { font-size: 14px; font-weight: bold; color: #0066cc; margin-bottom: 8px; }
-                .fact-text { font-size: 16px; line-height: 1.5; margin-bottom: 8px; }
-                .fact-link { font-size: 14px; }
+                h2 { color: #666; font-size: 20px; margin-top: 30px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+                .fact { margin-bottom: 15px; padding: 15px; background-color: #f5f5f5; border-radius: 8px; }
+                .title { font-size: 18px; font-weight: bold; color: #0066cc; margin-bottom: 5px; }
+                .category { font-size: 14px; color: #666; margin-bottom: 5px; }
+                .url { font-size: 14px; }
                 a { color: #0066cc; text-decoration: none; }
                 a:hover { text-decoration: underline; }
-                .footer { margin-top: 30px; font-size: 14px; color: #666; text-align: center; }
             </style>
         </head>
         <body>
@@ -459,26 +459,70 @@ struct ContentView: View
         
         """
         
-        for (index, fact) in wikipediaManager.factHistory.enumerated()
+        // Group facts by date
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: wikipediaManager.factHistory)
         {
+            fact in
+            calendar.startOfDay(for: fact.timestamp)
+        }
+        
+        let factsByDate = grouped.sorted { $0.key < $1.key }.map { (date: $0.key, facts: $0.value.sorted { $0.timestamp < $1.timestamp }) }
+        
+        for dateGroup in factsByDate
+        {
+            let dateHeader = formatDateForShare(dateGroup.date)
             html += """
-                <div class="fact">
-                    <div class="fact-number">Fact #\(index + 1)</div>
-                    <div class="fact-text">\(fact.text)</div>
-                    <div class="fact-link"><a href="\(fact.url.absoluteString)">Read more on Wikipedia</a></div>
-                </div>
+                <h2>\(dateHeader)</h2>
             
             """
+            
+            for fact in dateGroup.facts
+            {
+                html += """
+                    <div class="fact">
+                        <div class="title">\(fact.title)</div>
+                        <div class="category">Category: \(fact.category)</div>
+                        <div class="url"><a href="\(fact.url.absoluteString)">\(fact.url.absoluteString)</a></div>
+                    </div>
+                
+                """
+            } // for
         } // for
         
         html += """
-            <div class="footer">Shared from the WikiCurios app</div>
         </body>
         </html>
         """
         
         return html
     } // createShareText
+    
+    
+    
+    // -----------------------------------------
+    
+    private func formatDateForShare(_ date: Date) -> String
+    {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        
+        if calendar.isDate(date, inSameDayAs: today)
+        {
+            return "Today"
+        }
+        else if calendar.isDate(date, inSameDayAs: yesterday)
+        {
+            return "Yesterday"
+        }
+        else
+        {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, MMMM d, yyyy"
+            return formatter.string(from: date)
+        }
+    } // formatDateForShare
     
     
     

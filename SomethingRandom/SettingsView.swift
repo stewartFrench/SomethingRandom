@@ -113,21 +113,19 @@ struct SettingsView: View
 
                 Section(header: Text("Spoken Length"))
                 {
-                    Stepper(value : $wikipediaManager.maxSpokenSentences,
-                            in    : 1...20)
+                    Stepper(value : $wikipediaManager.minSpokenCharacters,
+                            in    : 100...2000,
+                            step  : 100)
                     {
-                        Text("Limit speaking to \(wikipediaManager.maxSpokenSentences) " +
-                             (wikipediaManager.maxSpokenSentences == 1 ? "sentence" : "sentences"))
+                        Text("Minimum \(wikipediaManager.minSpokenCharacters) characters")
                     } // Stepper
-                    .onChange(of: wikipediaManager.maxSpokenSentences)
+                    .onChange(of: wikipediaManager.minSpokenCharacters)
                     {
                         oldValue, newValue in
                         wikipediaManager.saveMaxSpokenSentences()
                     } // onChange
 
-                    Text("Only the first \(wikipediaManager.maxSpokenSentences) " +
-                         (wikipediaManager.maxSpokenSentences == 1 ? "sentence" : "sentences") +
-                         " of each fact will be spoken, even if the full fact is longer.")
+                    Text("Facts will be spoken until at least \(wikipediaManager.minSpokenCharacters) characters are read, then the current sentence will be completed. This ensures facts with many initials or short sentences aren't cut off too early.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 } // Section
@@ -942,6 +940,57 @@ struct UsedFactsView: View
     @ObservedObject var wikipediaManager: WikipediaManager
     @Environment(\.dismiss) var dismiss
     @State private var showingDeleteAllAlert = false
+    @State private var scrollToBottom = false
+    @State private var searchText = ""
+    
+    
+    
+    // -----------------------------------------
+    // Group facts by date
+    
+    private var factsByDate: [(date: Date, facts: [UsedFactTitle])]
+    {
+        let calendar = Calendar.current
+        
+        // Filter facts based on search text
+        let filteredFacts = searchText.isEmpty ? wikipediaManager.usedFactTitlesList : wikipediaManager.usedFactTitlesList.filter
+        {
+            fact in
+            fact.title.localizedCaseInsensitiveContains(searchText) ||
+            fact.category.localizedCaseInsensitiveContains(searchText)
+        }
+        
+        let grouped = Dictionary(grouping: filteredFacts)
+        {
+            fact in
+            calendar.startOfDay(for: fact.timestamp)
+        }
+        
+        return grouped.sorted { $0.key < $1.key }.map { (date: $0.key, facts: $0.value.sorted { $0.timestamp < $1.timestamp }) }
+    }
+    
+    
+    
+    // -----------------------------------------
+    // Format date for section header
+    
+    private func formatDate(_ date: Date) -> String
+    {
+        // Check if this is a legacy fact (year 1 or earlier indicates Date.distantPast)
+        let calendar = Calendar.current
+        let year = calendar.component(.year, from: date)
+        
+        if year <= 1
+        {
+            return "Legacy Facts"
+        }
+        else
+        {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE, MMMM d, yyyy"
+            return formatter.string(from: date)
+        }
+    }
 
 
 
@@ -969,48 +1018,79 @@ struct UsedFactsView: View
                     .padding()
                 } // if
                 
-                List
+                ScrollViewReader
                 {
-                    ForEach(wikipediaManager.usedFactTitlesList, id: \.self)
-                {
-                    usedFact in
-
-                    Link(destination: wikipediaURL(for: usedFact.title))
+                    proxy in
+                    
+                    List
                     {
-                        HStack
+                        ForEach(factsByDate, id: \.date)
                         {
-                            VStack(alignment: .leading, spacing: 4)
-                            {
-                                Text(usedFact.title)
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                
-                                HStack(spacing: 4)
-                                {
-                                    Text("Category: \(usedFact.category)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    
-                                    if let count = wikipediaManager.categoryArticleCounts[usedFact.category.replacingOccurrences(of: " ", with: "_")]
-                                    {
-                                        Text("(\(count) articles)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                            } // VStack
+                            dateGroup in
                             
-                            Spacer()
-                            
-                            Image(systemName: "arrow.up.right.square")
+                            Section(header: Text(formatDate(dateGroup.date))
                                 .font(.caption)
-                                .foregroundColor(.blue)
-                        } // HStack
-                        .padding(.vertical, 4)
-                    } // Link
-                } // ForEach
-                .onDelete(perform: deleteTitle)
-            } // List
+                                .foregroundColor(.secondary))
+                            {
+                                ForEach(dateGroup.facts, id: \.self)
+                                {
+                                    usedFact in
+
+                                    Link(destination: wikipediaURL(for: usedFact.title))
+                                    {
+                                        HStack
+                                        {
+                                            VStack(alignment: .leading, spacing: 4)
+                                            {
+                                                Text(usedFact.title)
+                                                    .font(.body)
+                                                    .foregroundColor(.primary)
+                                                
+                                                HStack(spacing: 4)
+                                                {
+                                                    Text("Category: \(usedFact.category)")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                    
+                                                    if let count = wikipediaManager.categoryArticleCounts[usedFact.category.replacingOccurrences(of: " ", with: "_")]
+                                                    {
+                                                        Text("(\(count) articles)")
+                                                            .font(.caption)
+                                                            .foregroundColor(.secondary)
+                                                    }
+                                                }
+                                            } // VStack
+                                            
+                                            Spacer()
+                                            
+                                            Image(systemName: "arrow.up.right.square")
+                                                .font(.caption)
+                                                .foregroundColor(.blue)
+                                        } // HStack
+                                        .padding(.vertical, 4)
+                                    } // Link
+                                    .id(usedFact.id)
+                                } // ForEach
+                            } // Section
+                        } // ForEach
+                    } // List
+                    .onAppear
+                    {
+                        scrollToBottom = true
+                    }
+                    .onChange(of: scrollToBottom)
+                    {
+                        oldValue, newValue in
+                        if newValue, let lastDateGroup = factsByDate.last, let lastFact = lastDateGroup.facts.last
+                        {
+                            // Wait for List to fully render before scrolling
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)
+                            {
+                                proxy.scrollTo(lastFact.id, anchor: .bottom)
+                            }
+                        }
+                    }
+                } // ScrollViewReader
             
             // Delete All Button at bottom
             
@@ -1043,6 +1123,7 @@ struct UsedFactsView: View
                     } // Button
                 } // ToolbarItem
             } // toolbar
+            .searchable(text: $searchText, prompt: "Search titles or categories")
             .alert("Delete All Titles", isPresented: $showingDeleteAllAlert)
             {
                 Button("Cancel", role: .cancel) { }
@@ -1063,25 +1144,8 @@ struct UsedFactsView: View
 
     // -----------------------------------------
 
-    private func deleteTitle(at offsets: IndexSet)
-    {
-        let titles = wikipediaManager.usedFactTitlesList
-        
-        for index in offsets
-        {
-            let title = titles[index]
-            wikipediaManager.removeUsedFactTitle(title)
-        } // for
-    } // deleteTitle
-    
-    
-    
-    // -----------------------------------------
-
     private func createShareText() -> String
     {
-        let usedFacts = wikipediaManager.usedFactTitlesList
-        
         var html = """
         <!DOCTYPE html>
         <html>
@@ -1091,7 +1155,8 @@ struct UsedFactsView: View
             <style>
                 body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 20px; }
                 h1 { color: #333; }
-                .fact { margin-bottom: 20px; padding: 15px; background-color: #f5f5f5; border-radius: 8px; }
+                h2 { color: #666; font-size: 20px; margin-top: 30px; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 5px; }
+                .fact { margin-bottom: 15px; padding: 15px; background-color: #f5f5f5; border-radius: 8px; }
                 .title { font-size: 18px; font-weight: bold; color: #0066cc; margin-bottom: 5px; }
                 .category { font-size: 14px; color: #666; margin-bottom: 5px; }
                 .url { font-size: 14px; }
@@ -1104,17 +1169,27 @@ struct UsedFactsView: View
         
         """
         
-        for (index, usedFact) in usedFacts.enumerated()
+        // Group facts by date
+        for dateGroup in factsByDate
         {
-            let url = wikipediaURL(for: usedFact.title)
+            let dateHeader = formatDate(dateGroup.date)
             html += """
-                <div class="fact">
-                    <div class="title">\(index + 1). \(usedFact.title)</div>
-                    <div class="category">Category: \(usedFact.category)</div>
-                    <div class="url"><a href="\(url.absoluteString)">\(url.absoluteString)</a></div>
-                </div>
+                <h2>\(dateHeader)</h2>
             
             """
+            
+            for usedFact in dateGroup.facts
+            {
+                let url = wikipediaURL(for: usedFact.title)
+                html += """
+                    <div class="fact">
+                        <div class="title">\(usedFact.title)</div>
+                        <div class="category">Category: \(usedFact.category)</div>
+                        <div class="url"><a href="\(url.absoluteString)">\(url.absoluteString)</a></div>
+                    </div>
+                
+                """
+            } // for
         } // for
         
         html += """

@@ -23,7 +23,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     @Published var isEnabled          : Bool                       = false
     @Published var frequencyMinutes   : Double                     = 5.0
     @Published var isRandomTiming     : Bool                       = false
-    @Published var maxSpokenSentences : Int                        = 3
+    @Published var minSpokenCharacters : Int                       = 300
     @Published var isHumorMode        : Bool                       = false
     @Published var availableVoices    : [AVSpeechSynthesisVoice]   = []
     @Published var selectedVoice      : AVSpeechSynthesisVoice?
@@ -42,7 +42,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     var usedFactTitlesList: [UsedFactTitle]
     {
-        return Array(usedFactTitles).sorted { $0.title < $1.title }
+        return Array(usedFactTitles).sorted { $0.timestamp < $1.timestamp }
     } // usedFactTitlesList
     
     private var synthesizer = AVSpeechSynthesizer()
@@ -563,15 +563,20 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     {
         let defaults = UserDefaults.standard
 
-        if defaults.object(forKey: "maxSpokenSentences") != nil
+        // Check for new key first
+        if defaults.object(forKey: "minSpokenCharacters") != nil
         {
-            maxSpokenSentences = defaults.integer(forKey: "maxSpokenSentences")
-            // print("Restored max spoken sentences: \(maxSpokenSentences)")
-        } // if
-        else
+            minSpokenCharacters = defaults.integer(forKey: "minSpokenCharacters")
+        }
+        // Migrate old maxSpokenSentences setting to character-based
+        else if defaults.object(forKey: "maxSpokenSentences") != nil
         {
-            // print("Using default max spoken sentences: \(maxSpokenSentences)")
-        } // else
+            let oldSentences = defaults.integer(forKey: "maxSpokenSentences")
+            // Rough conversion: 1 sentence ≈ 100 characters
+            minSpokenCharacters = oldSentences * 100
+            defaults.removeObject(forKey: "maxSpokenSentences")
+            defaults.set(minSpokenCharacters, forKey: "minSpokenCharacters")
+        }
     } // loadMaxSpokenSentences
 
 
@@ -581,7 +586,7 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     func saveMaxSpokenSentences()
     {
         let defaults = UserDefaults.standard
-        defaults.set(maxSpokenSentences, forKey: "maxSpokenSentences")
+        defaults.set(minSpokenCharacters, forKey: "minSpokenCharacters")
     } // saveMaxSpokenSentences
 
 
@@ -614,12 +619,12 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
     
     // -----------------------------------------
 
-    nonisolated private func truncateToSentences(_ text: String, maxSentences: Int) -> String
+    nonisolated private func truncateToSentences(_ text: String, minCharacters: Int) -> String
     {
-        // Truncate text to first N sentences using natural-language segmentation
+        // Speak at least minCharacters worth of content, then complete the current sentence
         
         var sentences: [String] = []
-        var sentenceCount = 0
+        var totalCharacters = 0
         
         text.enumerateSubstrings(in       : text.startIndex..<text.endIndex,
                                   options : .bySentences)
@@ -630,9 +635,10 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                !substring.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             {
                 sentences.append(substring)
-                sentenceCount += 1
+                totalCharacters += substring.count
                 
-                if sentenceCount >= maxSentences
+                // Once we've reached the minimum character count, complete this sentence and stop
+                if totalCharacters >= minCharacters
                 {
                     stop = true
                 } // if
@@ -906,7 +912,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                     text: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     url: URL(string: "https://en.wikipedia.org")!,
                     category: "Error",
-                    pageid: 0
+                    pageid: 0,
+                    timestamp: Date()
                 )
                 speakFact(errorFact)
             } // MainActor
@@ -977,7 +984,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                     text: "Sorry, I couldn't fetch a random fact from Wikipedia right now.",
                     url: URL(string: "https://en.wikipedia.org")!,
                     category: "Error",
-                    pageid: 0
+                    pageid: 0,
+                    timestamp: Date()
                 )
                 speakFact(errorFact)
             } // MainActor
@@ -1182,7 +1190,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
                                  text: factText,
                                  url: url,
                                  category: displayCategory,
-                                 pageid: summaryResponse.pageid)
+                                 pageid: summaryResponse.pageid,
+                                 timestamp: Date())
 
         return fact
     } // fetchFromCategory
@@ -1276,8 +1285,8 @@ class WikipediaManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate
         // Set the title immediately when we start speaking
         currentSpeakingTitle = fact.title
         
-        // Truncate the fact text to maxSpokenSentences before speaking
-        let truncatedText = truncateToSentences(fact.text, maxSentences: maxSpokenSentences)
+        // Truncate the fact text to minSpokenCharacters before speaking
+        let truncatedText = truncateToSentences(fact.text, minCharacters: minSpokenCharacters)
         
         // Store the truncated fact text to be spoken after intro
         pendingFactText = truncatedText
@@ -1785,6 +1794,7 @@ struct WikipediaFact: Identifiable
     let url: URL
     let category: String
     let pageid: Int
+    let timestamp: Date
 } // struct WikipediaFact
 
 
@@ -1798,6 +1808,7 @@ struct WikipediaFact: Identifiable
     let title: String
     let category: String
     let pageid: Int
+    let timestamp: Date
     
     init(title: String, category: String, pageid: Int)
     {
@@ -1805,6 +1816,7 @@ struct WikipediaFact: Identifiable
         self.title = title
         self.category = category
         self.pageid = pageid
+        self.timestamp = Date()
     } // init
     
     // -----------------------------------------
@@ -1818,12 +1830,14 @@ struct WikipediaFact: Identifiable
         self.category = try container.decode(String.self, forKey: .category)
         // Default to 0 if pageid is missing (backward compatibility)
         self.pageid = try container.decodeIfPresent(Int.self, forKey: .pageid) ?? 0
+        // Default to distant past if timestamp is missing (backward compatibility)
+        self.timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date.distantPast
     } // init(from:)
     
     // ------------
     private enum CodingKeys: String, CodingKey
     {
-        case id, title, category, pageid
+        case id, title, category, pageid, timestamp
     } // CodingKeys
     
     // -----------------------------------------

@@ -2,9 +2,9 @@
 ## WikiCurios (Curiosities From Wikipedia) iOS Application
 ## Built in Xcode as "SomethingRandom"
 
-**Version:** 1.1
+**Version:** 2.0
 
-**Date:** August 5, 2026
+**Date:** September 16, 2026
 
 **Author:** Stewart French, Claude Sonnet 4.5 by Anthropic
 
@@ -80,13 +80,21 @@ text-to-speech technology without requiring user interaction.
   - Next fact time display (updates with slider and random toggle)
   - Stop speaking button for immediate interruption
   - **Wikipedia pageid-based duplicate prevention** with title fallback
-  - Spoken length control (1-20 sentences) with post-retrieval truncation
+  - **Character-based spoken length control** (100-2000 characters) with sentence completion
+  - **Timestamped fact tracking** for chronological organization
+  - **Date-grouped Used Facts view** with search functionality
+  - **Consistent HTML export** with date organization across all share functions
   - Comprehensive settings with category and keyword management
   - **Category validation** with Wikipedia API verification and article counts
   - **Enhanced category management** (tap for info, delete confirmation, duplicate detection)
   - Reset to Defaults confirmation alert
   - Auto-save settings changes
-  - View and manage used fact titles with categories and deletion support
+  - View and manage used fact titles with:
+    - Chronological date grouping (oldest to newest)
+    - Legacy Facts section for pre-timestamp data
+    - Full-text search by title or category
+    - Auto-scroll to most recent facts
+    - Consistent HTML export with date headers
 
 ---
 
@@ -655,7 +663,7 @@ SomethingRandom/
 
 #### 5.3.1 WikipediaFact (Struct)
 
-**Purpose:** Store fact text with Wikipedia URL, category, and pageid
+**Purpose:** Store fact text with Wikipedia URL, category, pageid, and timestamp
 
 **Properties:**
 
@@ -665,12 +673,13 @@ SomethingRandom/
   - `url: URL` - Wikipedia article URL
   - `category: String` - Wikipedia category name (for display)
   - `pageid: Int` - Wikipedia page ID for reliable duplicate detection
+  - `timestamp: Date` - When fact was retrieved/spoken for date grouping
 
 **Conformance:** Identifiable
 
 #### 5.3.2 UsedFactTitle (Struct)
 
-**Purpose:** Store used fact titles with categories and pageids for duplicate prevention
+**Purpose:** Store used fact titles with categories, pageids, and timestamps for duplicate prevention and chronological organization
 
 **Properties:**
 
@@ -678,13 +687,14 @@ SomethingRandom/
   - `title: String` - Wikipedia article title
   - `category: String` - Wikipedia category name
   - `pageid: Int` - Wikipedia page ID (0 for legacy data)
+  - `timestamp: Date` - When fact was used (Date.distantPast for legacy data)
 
 **Conformance:** Codable, Hashable, Identifiable, Sendable
 
 **Custom Implementations:**
 
   - Custom Hashable: Prioritizes pageid over title+category for hashing
-  - Custom Codable decoder: Defaults pageid to 0 for backward compatibility
+  - Custom Codable decoder: Defaults pageid to 0 and timestamp to Date.distantPast for backward compatibility
   - Custom equality: Compares pageids if both > 0, otherwise falls back to title+category
 
 #### 5.3.3 WikipediaRandomResponse (Struct)
@@ -766,7 +776,7 @@ SomethingRandom/
 @Published var isEnabled          : Bool
 @Published var frequencyMinutes   : Double
 @Published var isRandomTiming     : Bool
-@Published var maxSpokenSentences : Int
+@Published var minSpokenCharacters : Int
 @Published var isHumorMode        : Bool
 @Published var availableVoices    : [AVSpeechSynthesisVoice]
 @Published var selectedVoice      : AVSpeechSynthesisVoice?
@@ -796,7 +806,7 @@ var usedFactTitlesList            : [UsedFactTitle]
   - `fetchAndSpeakRandomFact()`   - Main fact retrieval and playback
   - `fetchRandomWikipediaFact()`   - Select category and fetch; applies Humor Mode filtering if enabled
   - `fetchFromCategory(_:negativeKeywords:)`   - Get random from category; checks pageid and title for duplicates
-  - `truncateToSentenceLimit(_:limit:)`   - Truncate fact text to N sentences before speaking
+  - `truncateToSentences(_:minCharacters:)`   - Speak at least N characters then complete current sentence
   - `sentenceCount(in:)`   - Count sentences in text via `.bySentences` enumeration
   - `speakFact(_:)`   - Text-to-speech with intro and sentence truncation
   - `fetchAndSpeakRandomFact()`   - Fetch and speak fact (used by timer and UI)
@@ -849,13 +859,17 @@ var usedFactTitlesList            : [UsedFactTitle]
 **Behavior:**
 
   - Share creates formatted HTML file (WikiCurios_Facts.html) as attachment
-  - HTML includes styled boxes with fact numbers, fact text, and clickable "Read more on Wikipedia" links
+  - **Date-grouped HTML export** matching Used Facts view format
+  - HTML includes date section headers (e.g., "Today", "Yesterday", "Friday, September 16, 2026")
+  - HTML includes styled boxes with titles, categories, and clickable Wikipedia links
   - HTML formatting ensures proper display in email clients
+  - Consistent with Used Facts share format
 
 **Helper Methods:**
 
-  - `createShareText()` - Generates HTML document with styled fact list
+  - `createShareText()` - Generates HTML document with date headers and styled fact list
   - `createHTMLFile()` - Writes HTML to temporary file and returns URL for sharing
+  - `formatDateForShare(_:)` - Formats dates with Today/Yesterday or full date with day of week
   - `voiceDisplayName(_:)` - Formats voice name with language code
 
 #### 5.3.9 SettingsView (Struct)
@@ -866,7 +880,7 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - Content Filter section
     - Humor Mode toggle
-  - Spoken Length section (stepper 1-20 sentences)
+  - Spoken Length section (stepper 100-2000 characters in steps of 100)
   - Navigate to Manage Categories (with count badge)
   - Navigate to Manage Humorous Categories (with count badge)
   - Navigate to Manage Negative Keywords (with count badge)
@@ -986,37 +1000,54 @@ var usedFactTitlesList            : [UsedFactTitle]
 
 #### 5.3.13 UsedFactsView (Struct)
 
-**Purpose:** View, share, and delete used fact titles
+**Purpose:** View, search, share, and delete used fact titles with chronological date organization
 
 **Components:**
 
   - Share All Titles button at top (blue background)
-  - Sorted list of all used fact titles
-  - Swipe-to-delete gesture for individual titles
-  - Delete All button at bottom (with confirmation alert)
+  - **Searchable list** with pull-to-reveal search bar
+  - **Date-grouped sections** with section headers (e.g., "Friday, September 16, 2026")
+  - **"Legacy Facts" section** for pre-timestamp data (shown as oldest group)
+  - Chronologically sorted facts (oldest date to newest date)
+  - **Auto-scroll to bottom** on view appear (shows most recent facts)
   - Each title is clickable Wikipedia link
+  - Delete All button at bottom (with confirmation alert)
   - Done button in toolbar
 
 **State:**
 
   - `@ObservedObject var wikipediaManager: WikipediaManager`
   - `@State private var showingDeleteAllAlert: Bool`
+  - `@State private var scrollToBottom: Bool`
+  - `@State private var searchText: String`
+
+**Computed Properties:**
+
+  - `factsByDate: [(date: Date, facts: [UsedFactTitle])]` - Groups and sorts facts by date
+  - Filters by search text (searches title and category)
 
 **Behavior:**
 
+  - **Search functionality**: Filters facts by title or category (case-insensitive)
+  - **Date grouping**: Facts grouped by day with formatted headers
+  - **Date formatting**:
+    - "Legacy Facts" for Date.distantPast (year <= 1)
+    - "Friday, September 16, 2026" format (day of week, month, day, year)
   - Share creates formatted HTML file (WikiCurios_Facts.html) as attachment
-  - HTML includes styled boxes with titles, categories, and clickable URLs
+  - HTML includes date headers and styled boxes with titles, categories, and clickable URLs
   - Real-time count updates via @Published usedFactTitles
   - Confirmation dialog before deleting all titles
   - Dismisses view after Delete All
   - Opens Wikipedia in Safari when title tapped
+  - Auto-scrolls to most recent fact on appear (with delay for rendering)
 
 **Helper Methods:**
 
-  - `createShareText()` - Generates HTML document with styled fact list
+  - `factsByDate` - Groups facts by date and sorts chronologically
+  - `formatDate(_:)` - Formats date for section headers with "Legacy Facts" handling
+  - `createShareText()` - Generates HTML document with date headers and styled fact list
   - `createHTMLFile()` - Writes HTML to temporary file and returns URL for sharing
   - `wikipediaURL(for:)` - Converts title to Wikipedia URL
-  - `deleteTitle(at:)` - Removes individual title from set
 
 #### 5.3.14 CategoriesData (Struct)
 
@@ -1117,14 +1148,16 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Does not affect custom user-added categories
   - Persists across app launches
 
-**Spoken Length Truncation:**
+**Spoken Length Truncation (Character-Based):**
 
-  - User-configurable maximum spoken sentences (`maxSpokenSentences`, default 3, range 1–20)
+  - User-configurable minimum spoken characters (`minSpokenCharacters`, default 300, range 100–2000, step 100)
   - Applied after fact is retrieved and before speech synthesis
-  - Truncates fact text to first N sentences using `.bySentences` enumeration
+  - Speaks at least N characters, then completes the current sentence using `.bySentences` enumeration
+  - Solves issue with facts containing many initials (e.g., "U.S.A.", "J.F.K.") being cut off prematurely
   - Full fact text stored in history, but only truncated portion is spoken
   - More efficient than retrieval-time filtering - uses first acceptable fact without retries
   - No auto-escalation needed since truncation happens post-retrieval
+  - Migrates old sentence-based settings (1 sentence ≈ 100 characters)
 
 **Quality Assurance:**
 
@@ -1148,7 +1181,27 @@ var usedFactTitlesList            : [UsedFactTitle]
   - Clickable links to Wikipedia
   - Auto-scroll to newest
 
-### 6.4 Persistence Strategy
+### 6.4 Used Facts Timestamp Tracking
+
+**Purpose:** Track when facts were used for chronological organization and historical context
+
+**Implementation:**
+
+  - UsedFactTitle struct includes `timestamp: Date` field
+  - Timestamp automatically set to `Date()` when fact is marked as used
+  - Backward compatible with legacy data (defaults to `Date.distantPast` for old entries)
+  - Enables chronological sorting and date grouping in UI
+  - Persisted to UserDefaults with all other UsedFactTitle data
+
+**Benefits:**
+
+  - Historical context for when facts were learned
+  - Chronological organization in Used Facts view
+  - Date-grouped display with section headers
+  - Search and filtering by date ranges (future enhancement)
+  - Better user experience with familiar date presentation
+
+### 6.5 Persistence Strategy
 
 **Storage:** UserDefaults
 
@@ -1156,7 +1209,8 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - `frequencyMinutes`   - Double value for timer interval
   - `isRandomTiming`   - Boolean for random timing mode
-  - `maxSpokenSentences`   - Int value for the maximum spoken sentence limit (default 3)
+  - `minSpokenCharacters`   - Int value for minimum spoken characters (default 300, range 100-2000)
+  - `maxSpokenSentences`   - Legacy key (migrated to minSpokenCharacters)
   - `isHumorMode`   - Boolean for Humor Mode filter
   - `selectedVoiceIdentifier`   - String for voice persistence
   - `usedFactTitlesWithCategories`   - JSON encoded array of UsedFactTitle (with pageids) for duplicate prevention
@@ -1168,10 +1222,10 @@ var usedFactTitlesList            : [UsedFactTitle]
 
   - When frequency slider changes
   - When random button toggled
-  - When spoken sentence limit stepper changes
+  - When spoken character limit stepper changes
   - When Humor Mode toggle changes
   - When voice selection changes
-  - When each fact is spoken (title and pageid marked as used)
+  - When each fact is spoken (title, pageid, and timestamp marked as used)
   - When category article counts are fetched (cached for 24 hours)
 
 **Load Points:**
@@ -1586,6 +1640,41 @@ Inc. This app is not affiliated with or endorsed by the Wikimedia Foundation."
 ---
 
 ## Appendix A: Version History
+
+**Version 2.0 (September 16, 2026)**
+
+  - **Character-based spoken length control** (replaces sentence-based)
+    - Changed from `maxSpokenSentences` to `minSpokenCharacters`
+    - Range: 100-2000 characters in steps of 100 (default: 300)
+    - Speaks at least N characters, then completes current sentence
+    - Solves issue with facts containing many initials being cut off prematurely
+    - Automatic migration from old sentence-based settings
+  - **Timestamped fact tracking** for chronological organization
+    - Added `timestamp: Date` field to both WikipediaFact and UsedFactTitle
+    - Automatically set when facts are retrieved/used
+    - Backward compatible with legacy data (defaults to Date.distantPast)
+  - **Enhanced Used Facts view** with date organization
+    - Facts grouped by date with section headers
+    - "Legacy Facts" section for pre-timestamp data
+    - Full date format with day of week (e.g., "Friday, September 16, 2026")
+    - Auto-scroll to bottom on open (shows most recent facts)
+    - Chronological sorting (oldest to newest)
+  - **Search functionality** in Used Facts view
+    - Pull-to-reveal search bar
+    - Filters by fact title or category
+    - Case-insensitive search
+    - Real-time results
+  - **Consistent HTML export** across all share functions
+    - Date-grouped sections in exported HTML
+    - Main view "Share All Facts" now matches Used Facts format
+    - Clean format: date headers, then facts with title, category, and Wikipedia link
+    - No full fact text in exports (titles only for consistency)
+  - **Improved scrolling** in Used Facts view
+    - ScrollViewReader with proper timing
+    - Reliable scroll-to-bottom on view appear
+    - Smooth animated scrolling
+  - Removed swipe-to-delete from individual facts (kept Delete All button)
+  - Updated all documentation to reflect character-based spoken length
 
 **Version 1.1 (August 16, 2026)**
 
